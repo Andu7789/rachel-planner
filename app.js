@@ -322,7 +322,7 @@ class CoursePlanner {
             const weekEndNum = course.startWeek + course.duration - 1;
 
             return `
-                <div class="upcoming-item-compact" style="border-left-color: ${course.color}">
+                <div class="upcoming-item-compact" style="border-left-color: ${course.color}" onclick="planner.openCourseModal('${course.id}')">
                     <div class="upcoming-header">
                         <strong style="color: ${course.color}">${course.name}</strong>
                         <span class="upcoming-time">${days[course.dayOfWeek]} ${course.startTime}</span>

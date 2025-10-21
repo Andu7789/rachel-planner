@@ -244,6 +244,7 @@ body {
     border-radius: 4px;
     font-size: 0.85rem;
     transition: var(--transition);
+    cursor: pointer;
 }
 
 .upcoming-item-compact:hover {
