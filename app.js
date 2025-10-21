@@ -112,7 +112,7 @@ class CoursePlanner {
         const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
         const weekNumber = Math.floor(diffDays / 7) + 1;
 
-        return weekNumber >= 1 && weekNumber <= 20 ? weekNumber : null;
+        return weekNumber >= 1 && weekNumber <= 40 ? weekNumber : null;
     }
 
     getWeekStartDate(weekNumber) {
