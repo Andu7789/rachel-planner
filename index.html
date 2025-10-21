@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adult Learning Course Planner</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <h1>Course Planner</h1>
+            <div class="header-actions">
+                <button id="btn-dashboard" class="btn btn-secondary">Dashboard</button>
+                <button id="btn-tutors" class="btn btn-secondary">Tutors</button>
+                <button id="btn-locations" class="btn btn-secondary">Locations</button>
+                <button id="btn-courses" class="btn btn-secondary">Courses</button>
+                <button id="btn-reports" class="btn btn-secondary">Reports</button>
+                <button id="btn-export" class="btn btn-primary">Export</button>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Dashboard View -->
+            <section id="view-dashboard" class="view active">
+                <div class="dashboard-grid">
+                    <div class="dashboard-card">
+                        <h2>Settings</h2>
+                        <div class="form-group">
+                            <label for="week1-start-date">Week 1 Start Date</label>
+                            <input type="date" id="week1-start-date" class="input">
+                            <p style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.5rem;">
+                                Current Week: <strong id="current-week-display">Not Set</strong>
+                            </p>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <h2>Quick Stats</h2>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-value" id="stat-courses">0</span>
+                                <span class="stat-label">Courses Scheduled</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="stat-tutors">0</span>
+                                <span class="stat-label">Active Tutors</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="stat-locations">0</span>
+                                <span class="stat-label">Locations</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="stat-conflicts">0</span>
+                                <span class="stat-label">Conflicts</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card">
+                        <h2>Upcoming This Week</h2>
+                        <div id="upcoming-list" class="upcoming-list"></div>
+                    </div>
+
+                    <div class="dashboard-card">
+                        <h2>Resource Utilization</h2>
+                        <div id="utilization-chart" class="utilization-chart"></div>
+                    </div>
+
+                    <div class="dashboard-card">
+                        <h2>Recent Conflicts</h2>
+                        <div id="conflicts-list" class="conflicts-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tutors View -->
+            <section id="view-tutors" class="view">
+                <div class="view-header">
+                    <h2>Tutor Management</h2>
+                    <button id="btn-add-tutor" class="btn btn-primary">Add Tutor</button>
+                </div>
+                <div class="tutors-grid" id="tutors-grid"></div>
+            </section>
+
+            <!-- Locations View -->
+            <section id="view-locations" class="view">
+                <div class="view-header">
+                    <h2>Location Management</h2>
+                    <button id="btn-add-location" class="btn btn-primary">Add Location</button>
+                </div>
+                <div class="locations-grid" id="locations-grid"></div>
+            </section>
+
+            <!-- Courses/Calendar View -->
+            <section id="view-courses" class="view">
+                <div class="view-header">
+                    <h2>Course Schedule</h2>
+                    <div class="calendar-controls">
+                        <button id="btn-add-course" class="btn btn-primary">Add Course</button>
+                        <button id="btn-prev-weeks" class="btn btn-icon">←</button>
+                        <span id="week-range-display">Weeks 1-4</span>
+                        <button id="btn-next-weeks" class="btn btn-icon">→</button>
+                        <select id="view-mode-select" class="select">
+                            <option value="week">Week View</option>
+                            <option value="4weeks" selected>4 Weeks</option>
+                            <option value="month">Month View</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="calendar-container">
+                    <div id="calendar-grid" class="calendar-grid"></div>
+                </div>
+            </section>
+
+            <!-- Reports View -->
+            <section id="view-reports" class="view">
+                <div class="view-header">
+                    <h2>Reports</h2>
+                    <div class="report-controls">
+                        <select id="report-type-select" class="select">
+                            <option value="tutor-schedule">Tutor Schedules</option>
+                            <option value="location-utilization">Location Utilization</option>
+                            <option value="course-list">Course List</option>
+                            <option value="conflicts">Conflicts Report</option>
+                        </select>
+                        <button id="btn-generate-report" class="btn btn-primary">Generate</button>
+                    </div>
+                </div>
+                <div id="report-content" class="report-content"></div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Modal for Adding/Editing Tutor -->
+    <div id="modal-tutor" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="tutor-modal-title">Add Tutor</h3>
+                <button class="btn-close" data-modal="modal-tutor">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-tutor">
+                    <input type="hidden" id="tutor-id">
+                    <div class="form-group">
+                        <label for="tutor-name">Name</label>
+                        <input type="text" id="tutor-name" class="input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="tutor-email">Email</label>
+                        <input type="email" id="tutor-email" class="input">
+                    </div>
+                    <div class="form-group">
+                        <label for="tutor-phone">Phone</label>
+                        <input type="tel" id="tutor-phone" class="input">
+                    </div>
+                    <div class="form-group">
+                        <label for="tutor-skills">Skills/Qualifications</label>
+                        <input type="text" id="tutor-skills" class="input" placeholder="e.g., Art, Computing, Languages">
+                    </div>
+                    <div class="form-group">
+                        <label>Recurring Availability</label>
+                        <div id="tutor-recurring-availability" class="availability-grid"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Custom Availability/Exceptions</label>
+                        <button type="button" id="btn-add-custom-availability" class="btn btn-secondary btn-sm">Add Custom Period</button>
+                        <div id="tutor-custom-availability" class="custom-availability-list"></div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" data-modal="modal-tutor">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Tutor</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Adding/Editing Location -->
+    <div id="modal-location" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="location-modal-title">Add Location</h3>
+                <button class="btn-close" data-modal="modal-location">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-location">
+                    <input type="hidden" id="location-id">
+                    <div class="form-group">
+                        <label for="location-name">Name</label>
+                        <input type="text" id="location-name" class="input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="location-capacity">Capacity</label>
+                        <input type="number" id="location-capacity" class="input" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="location-facilities">Facilities</label>
+                        <input type="text" id="location-facilities" class="input" placeholder="e.g., Projector, Computers, Art Supplies">
+                    </div>
+                    <div class="form-group">
+                        <label>Recurring Availability</label>
+                        <div id="location-recurring-availability" class="availability-grid"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Custom Availability/Exceptions</label>
+                        <button type="button" id="btn-add-custom-location-availability" class="btn btn-secondary btn-sm">Add Custom Period</button>
+                        <div id="location-custom-availability" class="custom-availability-list"></div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" data-modal="modal-location">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Location</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Adding/Editing Course -->
+    <div id="modal-course" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="course-modal-title">Add Course</h3>
+                <button class="btn-close" data-modal="modal-course">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-course">
+                    <input type="hidden" id="course-id">
+                    <div class="form-group">
+                        <label for="course-name">Course Name</label>
+                        <input type="text" id="course-name" class="input" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="course-color">Color</label>
+                        <div style="display: flex; gap: 1rem; align-items: center;">
+                            <input type="color" id="course-color" class="input" value="#4a90e2" style="width: 80px; height: 40px; cursor: pointer;">
+                            <div id="color-preview" style="flex: 1; padding: 0.6rem; border-radius: 4px; border: 2px solid var(--gray-300); font-size: 0.85rem; font-weight: 500; text-align: center;">
+                                Selected Color
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="course-tutor">Tutor</label>
+                        <select id="course-tutor" class="select" required>
+                            <option value="">Select Tutor</option>
+                        </select>
+                        <div id="tutor-availability-warning" class="availability-warning" style="display: none;"></div>
+                    </div>
+                    <div class="form-group">
+                        <label for="course-location">Location</label>
+                        <select id="course-location" class="select" required>
+                            <option value="">Select Location</option>
+                        </select>
+                        <div id="location-availability-warning" class="availability-warning" style="display: none;"></div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="course-start-week">Start Week</label>
+                            <input type="number" id="course-start-week" class="input" min="1" max="20" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="course-duration">Duration (weeks)</label>
+                            <input type="number" id="course-duration" class="input" min="1" max="20" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="course-day">Day of Week</label>
+                        <select id="course-day" class="select" required>
+                            <option value="1">Monday</option>
+                            <option value="2">Tuesday</option>
+                            <option value="3">Wednesday</option>
+                            <option value="4">Thursday</option>
+                            <option value="5">Friday</option>
+                            <option value="6">Saturday</option>
+                            <option value="0">Sunday</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="course-start-time">Start Time</label>
+                            <input type="time" id="course-start-time" class="input" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="course-end-time">End Time</label>
+                            <input type="time" id="course-end-time" class="input" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="course-notes">Notes</label>
+                        <textarea id="course-notes" class="input" rows="3"></textarea>
+                    </div>
+                    <div id="course-conflicts-warning" class="availability-warning" style="display: none;"></div>
+                    <div class="form-actions">
+                        <div>
+                            <button type="button" id="btn-delete-course" class="btn btn-danger" style="display: none;">Delete Course</button>
+                        </div>
+                        <div style="display: flex; gap: 0.8rem;">
+                            <button type="button" class="btn btn-secondary" data-modal="modal-course">Cancel</button>
+                            <button type="submit" class="btn btn-primary">Save Course</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div id="modal-export" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Export Data</h3>
+                <button class="btn-close" data-modal="modal-export">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="export-options">
+                    <h4>Choose Export Format:</h4>
+                    <button id="btn-export-pdf" class="btn btn-primary btn-block">Export to PDF</button>
+                    <button id="btn-export-excel" class="btn btn-primary btn-block">Export to Excel</button>
+                    <button id="btn-export-json" class="btn btn-secondary btn-block">Export Data (JSON)</button>
+                    <h4 style="margin-top: 20px;">Import Data:</h4>
+                    <input type="file" id="input-import-json" accept=".json" class="input">
+                    <button id="btn-import-json" class="btn btn-secondary btn-block">Import from JSON</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
