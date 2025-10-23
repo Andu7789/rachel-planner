@@ -202,8 +202,14 @@ class CoursePlanner {
             const courseId = document.getElementById('course-id').value;
             if (courseId) this.deleteCourse(courseId);
         });
-        document.getElementById('btn-prev-weeks').addEventListener('click', () => this.changeWeekOffset(-4));
-        document.getElementById('btn-next-weeks').addEventListener('click', () => this.changeWeekOffset(4));
+        document.getElementById('btn-prev-weeks').addEventListener('click', () => {
+            const increment = this.calendarViewMode === 'week' ? 1 : 4;
+            this.changeWeekOffset(-increment);
+        });
+        document.getElementById('btn-next-weeks').addEventListener('click', () => {
+            const increment = this.calendarViewMode === 'week' ? 1 : 4;
+            this.changeWeekOffset(increment);
+        });
         document.getElementById('view-mode-select').addEventListener('change', (e) => {
             this.calendarViewMode = e.target.value;
             this.renderCalendar();
@@ -998,7 +1004,7 @@ class CoursePlanner {
     changeWeekOffset(change) {
         this.calendarWeekOffset += change;
         if (this.calendarWeekOffset < 0) this.calendarWeekOffset = 0;
-        if (this.calendarWeekOffset > 16) this.calendarWeekOffset = 16;
+        if (this.calendarWeekOffset > 36) this.calendarWeekOffset = 36; // Max offset 36 = Week 37-40 visible
         this.renderCalendar();
     }
 
