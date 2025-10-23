@@ -8,7 +8,7 @@ A comprehensive web-based course planning application designed for adult learnin
 ## Features
 
 ### 📅 Course Management
-- Schedule courses across 20 weeks
+- Schedule courses across 40 weeks
 - Multi-week course support
 - Color-coded courses for easy identification
 - Drag-free calendar view with week/4-week modes
