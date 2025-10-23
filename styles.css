@@ -70,8 +70,8 @@ body {
 /* Main Content */
 .main-content {
     flex: 1;
-    padding: 2rem;
-    max-width: 1600px;
+    padding: 1rem 1.5rem;
+    max-width: 100%;
     margin: 0 auto;
     width: 100%;
 }
@@ -86,6 +86,11 @@ body {
     animation: fadeIn 0.3s ease;
 }
 
+#view-courses {
+    height: calc(100vh - 60px);
+    overflow-y: auto;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
@@ -96,6 +101,15 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 2rem;
+}
+
+.view-header-sticky {
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 50;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--gray-300);
 }
 
 .view-header h2 {
@@ -459,23 +473,30 @@ body {
     text-align: center;
     font-weight: 600;
     font-size: 0.9rem;
+    position: sticky;
+    z-index: 20;
 }
 
 .calendar-week-header {
     background: var(--primary-dark);
     font-size: 1rem;
     font-weight: 700;
+    top: 0;
 }
 
 .calendar-day-header {
     background: var(--primary-color);
     font-size: 0.85rem;
     padding: 0.5rem;
+    top: 52px;
 }
 
 .calendar-time-label {
     background: var(--gray-100);
     padding: 0.5rem;
+    position: sticky;
+    left: 0;
+    z-index: 15;
     text-align: center;
     font-size: 0.85rem;
     color: var(--gray-700);
@@ -492,6 +513,14 @@ body {
     position: relative;
     cursor: pointer;
     transition: background 0.2s ease;
+}
+
+.calendar-cell.weekend {
+    background: #f5f5f5;
+}
+
+.calendar-header.weekend {
+    background: var(--primary-dark);
 }
 
 .calendar-cell:hover {
@@ -802,7 +831,6 @@ textarea.input {
 
 .report-table tr.clickable-row:hover {
     background: var(--gray-200);
-    transform: scale(1.01);
     transition: var(--transition);
 }
 

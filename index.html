@@ -95,9 +95,12 @@
 
             <!-- Courses/Calendar View -->
             <section id="view-courses" class="view">
-                <div class="view-header">
+                <div class="view-header view-header-sticky">
                     <h2>Course Schedule</h2>
                     <div class="calendar-controls">
+                        <select id="course-selector" class="select" style="min-width: 150px;">
+                            <option value="">Select a course...</option>
+                        </select>
                         <button id="btn-add-course" class="btn btn-primary">Add Course</button>
                         <button id="btn-prev-weeks" class="btn btn-icon">←</button>
                         <span id="week-range-display">Weeks 1-4</span>
@@ -242,6 +245,12 @@
                         </div>
                     </div>
                     <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                            <input type="checkbox" id="course-funded" style="width: 20px; height: 20px; cursor: pointer;">
+                            <span>Funded Course</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
                         <label for="course-tutor">Tutor</label>
                         <select id="course-tutor" class="select" required>
                             <option value="">Select Tutor</option>
@@ -266,16 +275,37 @@
                         </div>
                     </div>
                     <div class="form-group">
-                        <label for="course-day">Day of Week</label>
-                        <select id="course-day" class="select" required>
-                            <option value="1">Monday</option>
-                            <option value="2">Tuesday</option>
-                            <option value="3">Wednesday</option>
-                            <option value="4">Thursday</option>
-                            <option value="5">Friday</option>
-                            <option value="6">Saturday</option>
-                            <option value="0">Sunday</option>
-                        </select>
+                        <label>Days of Week (select one or more)</label>
+                        <div id="course-days-container" style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                                <input type="checkbox" name="course-day" value="1" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Mon</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                                <input type="checkbox" name="course-day" value="2" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Tue</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                                <input type="checkbox" name="course-day" value="3" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Wed</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                                <input type="checkbox" name="course-day" value="4" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Thu</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                                <input type="checkbox" name="course-day" value="5" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Fri</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                                <input type="checkbox" name="course-day" value="6" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Sat</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
+                                <input type="checkbox" name="course-day" value="0" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Sun</span>
+                            </label>
+                        </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
