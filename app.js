@@ -168,6 +168,7 @@ class CoursePlanner {
                 break;
             case 'courses':
                 this.renderCalendar();
+                this.populateCourseSelector();
                 break;
             case 'reports':
                 // Reports are generated on demand
@@ -227,6 +228,16 @@ class CoursePlanner {
         document.getElementById('view-mode-select').addEventListener('change', (e) => {
             this.calendarViewMode = e.target.value;
             this.renderCalendar();
+        });
+
+        // Course selector dropdown
+        document.getElementById('course-selector').addEventListener('change', (e) => {
+            const courseId = e.target.value;
+            if (courseId) {
+                this.openCourseModal(courseId);
+                // Reset the selector
+                e.target.value = '';
+            }
         });
 
         // Course form availability checking
@@ -328,9 +339,11 @@ class CoursePlanner {
                 return course.startWeek <= currentWeek + 1 && courseEndWeek >= currentWeek;
             })
             .sort((a, b) => {
-                // Sort by week, then by day
+                // Sort by week, then by day (use first day for multi-day courses)
                 if (a.startWeek !== b.startWeek) return a.startWeek - b.startWeek;
-                return a.dayOfWeek - b.dayOfWeek;
+                const aFirstDay = a.daysOfWeek ? a.daysOfWeek[0] : a.dayOfWeek;
+                const bFirstDay = b.daysOfWeek ? b.daysOfWeek[0] : b.dayOfWeek;
+                return aFirstDay - bFirstDay;
             })
             .slice(0, 10);
 
@@ -347,10 +360,18 @@ class CoursePlanner {
             const weekStart = this.getWeekStartDate(course.startWeek);
             const weekEndNum = course.startWeek + course.duration - 1;
 
-            // Check if resources are available
-            const tutorAvailable = this.checkTutorAvailability(course.tutorId, course.dayOfWeek, course.startTime, course.endTime);
-            const locationAvailable = this.checkLocationAvailability(course.locationId, course.dayOfWeek, course.startTime, course.endTime);
-            const hasAvailabilityIssue = !tutorAvailable || !locationAvailable;
+            // Check if resources are available on all days
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
+            let hasAvailabilityIssue = false;
+            courseDays.forEach(day => {
+                if (!this.checkTutorAvailability(course.tutorId, day, course.startTime, course.endTime) ||
+                    !this.checkLocationAvailability(course.locationId, day, course.startTime, course.endTime)) {
+                    hasAvailabilityIssue = true;
+                }
+            });
+
+            // Format days display
+            const daysList = courseDays.map(d => days[d]).join('/');
 
             return `
                 <div class="upcoming-item-compact" style="border-left-color: ${course.color}; cursor: pointer;" onclick="planner.openCourseModal('${course.id}')">
@@ -358,7 +379,7 @@ class CoursePlanner {
                         <strong style="color: ${course.color}">
                             ${hasAvailabilityIssue ? '<span class="conflict-indicator">!</span> ' : ''}${course.name}
                         </strong>
-                        <span class="upcoming-time">${days[course.dayOfWeek]} ${course.startTime}</span>
+                        <span class="upcoming-time">${daysList} ${course.startTime}</span>
                     </div>
                     <div class="upcoming-details">
                         <span>${tutor ? tutor.name : 'No tutor'} • ${location ? location.name : 'No location'}</span>
@@ -849,11 +870,18 @@ class CoursePlanner {
                 document.getElementById('course-name').value = course.name;
                 document.getElementById('course-color').value = course.color;
                 this.updateColorPreview(course.color);
+                document.getElementById('course-funded').checked = course.funded || false;
                 document.getElementById('course-tutor').value = course.tutorId;
                 document.getElementById('course-location').value = course.locationId;
                 document.getElementById('course-start-week').value = course.startWeek;
                 document.getElementById('course-duration').value = course.duration;
-                document.getElementById('course-day').value = course.dayOfWeek;
+
+                // Set day checkboxes (handle both old and new format)
+                const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                document.querySelectorAll('input[name="course-day"]').forEach(checkbox => {
+                    checkbox.checked = courseDays.includes(parseInt(checkbox.value));
+                });
+
                 document.getElementById('course-start-time').value = course.startTime;
                 document.getElementById('course-end-time').value = course.endTime;
                 document.getElementById('course-notes').value = course.notes || '';
@@ -866,9 +894,15 @@ class CoursePlanner {
             }
         } else {
             document.getElementById('course-modal-title').textContent = 'Add Course';
+            document.getElementById('course-id').value = ''; // Explicitly clear ID for new course
             const randomColor = this.getRandomColor();
             document.getElementById('course-color').value = randomColor;
             this.updateColorPreview(randomColor);
+
+            // Uncheck all day checkboxes for new course
+            document.querySelectorAll('input[name="course-day"]').forEach(checkbox => {
+                checkbox.checked = false;
+            });
 
             // Hide delete button for new courses
             document.getElementById('btn-delete-course').style.display = 'none';
@@ -894,7 +928,11 @@ class CoursePlanner {
         const courseId = document.getElementById('course-id').value;
         const tutorId = document.getElementById('course-tutor').value;
         const locationId = document.getElementById('course-location').value;
-        const dayOfWeek = parseInt(document.getElementById('course-day').value);
+
+        // Get all checked days
+        const dayCheckboxes = document.querySelectorAll('input[name="course-day"]:checked');
+        const daysOfWeek = Array.from(dayCheckboxes).map(cb => parseInt(cb.value));
+
         const startTime = document.getElementById('course-start-time').value;
         const endTime = document.getElementById('course-end-time').value;
         const startWeek = parseInt(document.getElementById('course-start-week').value);
@@ -903,66 +941,167 @@ class CoursePlanner {
         const tutorWarning = document.getElementById('tutor-availability-warning');
         const locationWarning = document.getElementById('location-availability-warning');
         const conflictWarning = document.getElementById('course-conflicts-warning');
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-        // Check tutor availability
-        if (tutorId && !isNaN(dayOfWeek) && startTime && endTime) {
-            const available = this.checkTutorAvailability(tutorId, dayOfWeek, startTime, endTime);
+        // Check tutor availability for all selected days
+        if (tutorId && daysOfWeek.length > 0 && startTime && endTime) {
             const tutorName = this.getTutorName(tutorId);
-            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const tutorUnavailableDays = [];
 
-            if (available) {
+            daysOfWeek.forEach(day => {
+                if (!this.checkTutorAvailability(tutorId, day, startTime, endTime)) {
+                    tutorUnavailableDays.push(days[day]);
+                }
+            });
+
+            if (tutorUnavailableDays.length === 0) {
                 tutorWarning.className = 'availability-warning success';
-                tutorWarning.textContent = `${tutorName} is available on ${days[dayOfWeek]} at this time`;
+                const daysList = daysOfWeek.map(d => days[d]).join(', ');
+                tutorWarning.textContent = `${tutorName} is available on ${daysList} at this time`;
                 tutorWarning.style.display = 'flex';
                 tutorWarning.style.cursor = 'default';
                 tutorWarning.onclick = null;
             } else {
-                tutorWarning.className = 'availability-warning warning clickable';
-                tutorWarning.innerHTML = `${tutorName} is NOT marked as available on ${days[dayOfWeek]} during ${startTime}-${endTime} <span style="font-size: 0.85em; opacity: 0.8;">(click to edit)</span>`;
+                // Find available tutors
+                const availableTutors = this.tutors.filter(tutor => {
+                    if (tutor.id === tutorId) return false; // Skip current tutor
+                    // Check if tutor is available on ALL selected days
+                    return daysOfWeek.every(day =>
+                        this.checkTutorAvailability(tutor.id, day, startTime, endTime)
+                    );
+                });
+
+                const alternativesId = 'tutor-alternatives-' + tutorId;
+                let alternativesHtml = '';
+
+                if (availableTutors.length > 0) {
+                    alternativesHtml = `
+                        <div id="${alternativesId}" style="display: none; margin-top: 0.5rem; padding: 0.5rem; background: #fff; border-radius: 4px; border: 1px solid #ddd;">
+                            <div style="font-weight: 600; margin-bottom: 0.3rem;">Available tutors (${availableTutors.length}):</div>
+                            ${availableTutors.map(tutor => `
+                                <div style="padding: 0.3rem; cursor: pointer; border-radius: 3px; margin-bottom: 0.2rem;"
+                                     onmouseover="this.style.background='#f0f0f0'"
+                                     onmouseout="this.style.background='transparent'"
+                                     onclick="document.getElementById('course-tutor').value='${tutor.id}'; planner.checkCourseFormAvailability();">
+                                    • ${tutor.name}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+
+                tutorWarning.className = 'availability-warning warning';
+                tutorWarning.innerHTML = `
+                    <div style="flex: 1;">
+                        <div>
+                            ${tutorName} is NOT marked as available on ${tutorUnavailableDays.join(', ')} during ${startTime}-${endTime}
+                        </div>
+                        ${availableTutors.length > 0 ? `
+                            <div style="margin-top: 0.5rem;">
+                                <span onclick="document.getElementById('${alternativesId}').style.display = document.getElementById('${alternativesId}').style.display === 'none' ? 'block' : 'none';"
+                                      style="color: #2563eb; cursor: pointer; text-decoration: underline; font-size: 0.9em;">
+                                    ${availableTutors.length === 1 ? '▼ Show available tutor' : `▼ Show available tutors (${availableTutors.length})`}
+                                </span>
+                            </div>
+                        ` : ''}
+                        ${alternativesHtml}
+                    </div>
+                    <div onclick="planner.closeModal('modal-course'); planner.openTutorModal('${tutorId}');"
+                         style="cursor: pointer; padding: 0.3rem 0.5rem; color: #666; font-size: 0.85em; opacity: 0.8; white-space: nowrap;"
+                         onmouseover="this.style.opacity='1'"
+                         onmouseout="this.style.opacity='0.8'">
+                        (edit tutor)
+                    </div>
+                `;
                 tutorWarning.style.display = 'flex';
-                tutorWarning.style.cursor = 'pointer';
-                tutorWarning.onclick = () => {
-                    this.closeModal('modal-course');
-                    this.openTutorModal(tutorId);
-                };
             }
         } else {
             tutorWarning.style.display = 'none';
         }
 
-        // Check location availability
-        if (locationId && !isNaN(dayOfWeek) && startTime && endTime) {
-            const available = this.checkLocationAvailability(locationId, dayOfWeek, startTime, endTime);
+        // Check location availability for all selected days
+        if (locationId && daysOfWeek.length > 0 && startTime && endTime) {
             const locationName = this.getLocationName(locationId);
-            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const locationUnavailableDays = [];
 
-            if (available) {
+            daysOfWeek.forEach(day => {
+                if (!this.checkLocationAvailability(locationId, day, startTime, endTime)) {
+                    locationUnavailableDays.push(days[day]);
+                }
+            });
+
+            if (locationUnavailableDays.length === 0) {
                 locationWarning.className = 'availability-warning success';
-                locationWarning.textContent = `${locationName} is available on ${days[dayOfWeek]} at this time`;
+                const daysList = daysOfWeek.map(d => days[d]).join(', ');
+                locationWarning.textContent = `${locationName} is available on ${daysList} at this time`;
                 locationWarning.style.display = 'flex';
                 locationWarning.style.cursor = 'default';
                 locationWarning.onclick = null;
             } else {
-                locationWarning.className = 'availability-warning warning clickable';
-                locationWarning.innerHTML = `${locationName} is NOT marked as available on ${days[dayOfWeek]} during ${startTime}-${endTime} <span style="font-size: 0.85em; opacity: 0.8;">(click to edit)</span>`;
+                // Find available locations
+                const availableLocations = this.locations.filter(location => {
+                    if (location.id === locationId) return false; // Skip current location
+                    // Check if location is available on ALL selected days
+                    return daysOfWeek.every(day =>
+                        this.checkLocationAvailability(location.id, day, startTime, endTime)
+                    );
+                });
+
+                const alternativesId = 'location-alternatives-' + locationId;
+                let alternativesHtml = '';
+
+                if (availableLocations.length > 0) {
+                    alternativesHtml = `
+                        <div id="${alternativesId}" style="display: none; margin-top: 0.5rem; padding: 0.5rem; background: #fff; border-radius: 4px; border: 1px solid #ddd;">
+                            <div style="font-weight: 600; margin-bottom: 0.3rem;">Available locations (${availableLocations.length}):</div>
+                            ${availableLocations.map(location => `
+                                <div style="padding: 0.3rem; cursor: pointer; border-radius: 3px; margin-bottom: 0.2rem;"
+                                     onmouseover="this.style.background='#f0f0f0'"
+                                     onmouseout="this.style.background='transparent'"
+                                     onclick="document.getElementById('course-location').value='${location.id}'; planner.checkCourseFormAvailability();">
+                                    • ${location.name}
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+
+                locationWarning.className = 'availability-warning warning';
+                locationWarning.innerHTML = `
+                    <div style="flex: 1;">
+                        <div>
+                            ${locationName} is NOT marked as available on ${locationUnavailableDays.join(', ')} during ${startTime}-${endTime}
+                        </div>
+                        ${availableLocations.length > 0 ? `
+                            <div style="margin-top: 0.5rem;">
+                                <span onclick="document.getElementById('${alternativesId}').style.display = document.getElementById('${alternativesId}').style.display === 'none' ? 'block' : 'none';"
+                                      style="color: #2563eb; cursor: pointer; text-decoration: underline; font-size: 0.9em;">
+                                    ${availableLocations.length === 1 ? '▼ Show available location' : `▼ Show available locations (${availableLocations.length})`}
+                                </span>
+                            </div>
+                        ` : ''}
+                        ${alternativesHtml}
+                    </div>
+                    <div onclick="planner.closeModal('modal-course'); planner.openLocationModal('${locationId}');"
+                         style="cursor: pointer; padding: 0.3rem 0.5rem; color: #666; font-size: 0.85em; opacity: 0.8; white-space: nowrap;"
+                         onmouseover="this.style.opacity='1'"
+                         onmouseout="this.style.opacity='0.8'">
+                        (edit location)
+                    </div>
+                `;
                 locationWarning.style.display = 'flex';
-                locationWarning.style.cursor = 'pointer';
-                locationWarning.onclick = () => {
-                    this.closeModal('modal-course');
-                    this.openLocationModal(locationId);
-                };
             }
         } else {
             locationWarning.style.display = 'none';
         }
 
         // Check for conflicts
-        if (tutorId && locationId && !isNaN(dayOfWeek) && startTime && endTime && !isNaN(startWeek) && !isNaN(duration)) {
+        if (tutorId && locationId && daysOfWeek.length > 0 && startTime && endTime && !isNaN(startWeek) && !isNaN(duration)) {
             const tempCourse = {
                 id: courseId || 'temp',
                 tutorId,
                 locationId,
-                dayOfWeek,
+                daysOfWeek,
                 startTime,
                 endTime,
                 startWeek,
@@ -1005,11 +1144,21 @@ class CoursePlanner {
         const courseId = document.getElementById('course-id').value || this.generateId();
         const name = document.getElementById('course-name').value;
         const color = document.getElementById('course-color').value;
+        const funded = document.getElementById('course-funded').checked;
         const tutorId = document.getElementById('course-tutor').value;
         const locationId = document.getElementById('course-location').value;
         const startWeek = parseInt(document.getElementById('course-start-week').value);
         const duration = parseInt(document.getElementById('course-duration').value);
-        const dayOfWeek = parseInt(document.getElementById('course-day').value);
+
+        // Get all checked days
+        const dayCheckboxes = document.querySelectorAll('input[name="course-day"]:checked');
+        const daysOfWeek = Array.from(dayCheckboxes).map(cb => parseInt(cb.value));
+
+        if (daysOfWeek.length === 0) {
+            alert('Please select at least one day of the week');
+            return;
+        }
+
         const startTime = document.getElementById('course-start-time').value;
         const endTime = document.getElementById('course-end-time').value;
         const notes = document.getElementById('course-notes').value;
@@ -1018,37 +1167,47 @@ class CoursePlanner {
             id: courseId,
             name,
             color,
+            funded,
             tutorId,
             locationId,
             startWeek,
             duration,
-            dayOfWeek,
+            daysOfWeek, // Array of days instead of single dayOfWeek
             startTime,
             endTime,
             notes
         };
 
-        // Check tutor availability
-        const tutorAvailable = this.checkTutorAvailability(tutorId, dayOfWeek, startTime, endTime);
-        if (!tutorAvailable) {
+        // Check tutor availability for all selected days
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const tutorUnavailableDays = [];
+        daysOfWeek.forEach(day => {
+            if (!this.checkTutorAvailability(tutorId, day, startTime, endTime)) {
+                tutorUnavailableDays.push(days[day]);
+            }
+        });
+        if (tutorUnavailableDays.length > 0) {
             const tutorName = this.getTutorName(tutorId);
-            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            if (!confirm(`Warning: ${tutorName} is not marked as available on ${days[dayOfWeek]} during ${startTime}-${endTime}.\n\nDo you want to schedule this course anyway?`)) {
+            if (!confirm(`Warning: ${tutorName} is not marked as available on ${tutorUnavailableDays.join(', ')} during ${startTime}-${endTime}.\n\nDo you want to schedule this course anyway?`)) {
                 return;
             }
         }
 
-        // Check location availability
-        const locationAvailable = this.checkLocationAvailability(locationId, dayOfWeek, startTime, endTime);
-        if (!locationAvailable) {
+        // Check location availability for all selected days
+        const locationUnavailableDays = [];
+        daysOfWeek.forEach(day => {
+            if (!this.checkLocationAvailability(locationId, day, startTime, endTime)) {
+                locationUnavailableDays.push(days[day]);
+            }
+        });
+        if (locationUnavailableDays.length > 0) {
             const locationName = this.getLocationName(locationId);
-            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            if (!confirm(`Warning: ${locationName} is not marked as available on ${days[dayOfWeek]} during ${startTime}-${endTime}.\n\nDo you want to schedule this course anyway?`)) {
+            if (!confirm(`Warning: ${locationName} is not marked as available on ${locationUnavailableDays.join(', ')} during ${startTime}-${endTime}.\n\nDo you want to schedule this course anyway?`)) {
                 return;
             }
         }
 
-        // Check for double-booking conflicts
+        // Check for double-booking conflicts on all days
         const conflicts = this.checkCourseConflicts(course);
         if (conflicts.length > 0) {
             const conflictMessages = conflicts.map(c => `- ${c.message}`).join('\n');
@@ -1070,6 +1229,7 @@ class CoursePlanner {
         // Always re-render calendar to update colors
         if (this.currentView === 'courses') {
             this.renderCalendar();
+            this.populateCourseSelector();
         }
         if (this.currentView === 'dashboard') {
             this.renderDashboard();
@@ -1082,6 +1242,7 @@ class CoursePlanner {
             this.saveData();
             this.closeModal('modal-course');
             this.renderCalendar();
+            this.populateCourseSelector();
             if (this.currentView === 'dashboard') this.renderDashboard();
         }
     }
@@ -1092,6 +1253,30 @@ class CoursePlanner {
         if (this.calendarWeekOffset < 0) this.calendarWeekOffset = 0;
         if (this.calendarWeekOffset > 36) this.calendarWeekOffset = 36; // Max offset 36 = Week 37-40 visible
         this.renderCalendar();
+    }
+
+    populateCourseSelector() {
+        const selector = document.getElementById('course-selector');
+        if (!selector) return;
+
+        const sortedCourses = [...this.courses].sort((a, b) => {
+            if (a.startWeek !== b.startWeek) return a.startWeek - b.startWeek;
+            // Sort by first day in the array for multi-day courses
+            const aFirstDay = a.daysOfWeek ? a.daysOfWeek[0] : a.dayOfWeek;
+            const bFirstDay = b.daysOfWeek ? b.daysOfWeek[0] : b.dayOfWeek;
+            if (aFirstDay !== bFirstDay) return aFirstDay - bFirstDay;
+            return a.name.localeCompare(b.name);
+        });
+
+        selector.innerHTML = '<option value="">Select a course...</option>' +
+            sortedCourses.map(course => {
+                const weekEnd = course.startWeek + course.duration - 1;
+                const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                // Show all days for multi-day courses
+                const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                const daysList = courseDays.map(d => days[d]).join('/');
+                return `<option value="${course.id}">${course.name} (${daysList} Wk${course.startWeek}${course.duration > 1 ? `-${weekEnd}` : ''})</option>`;
+            }).join('');
     }
 
     renderCalendar() {
@@ -1125,7 +1310,9 @@ class CoursePlanner {
         html += '<div class="calendar-header"></div>'; // Empty cell for time column
         for (let week = startWeek; week <= endWeek; week++) {
             for (let i = 1; i < days.length; i++) {
-                html += `<div class="calendar-header calendar-day-header">${days[i]}</div>`;
+                const dayOfWeek = i === 7 ? 0 : i;
+                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+                html += `<div class="calendar-header calendar-day-header ${isWeekend ? 'weekend' : ''}">${days[i]}</div>`;
             }
         }
 
@@ -1137,8 +1324,9 @@ class CoursePlanner {
                 for (let day = 1; day <= 7; day++) {
                     const dayOfWeek = day === 7 ? 0 : day;
                     const coursesAtSlot = this.getCoursesAtTimeSlot(week, week, dayOfWeek, time);
+                    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
 
-                    html += `<div class="calendar-cell ${coursesAtSlot.length > 0 ? 'has-course' : ''}"
+                    html += `<div class="calendar-cell ${coursesAtSlot.length > 0 ? 'has-course' : ''} ${isWeekend ? 'weekend' : ''}"
                              data-week="${week}" data-day="${dayOfWeek}" data-time="${time}">`;
 
                     coursesAtSlot.forEach(course => {
@@ -1148,9 +1336,9 @@ class CoursePlanner {
                         // Check if this specific course has a conflict
                         const courseHasConflict = this.checkCourseConflicts(course).length > 0;
 
-                        // Check if resources are available
-                        const tutorAvailable = this.checkTutorAvailability(course.tutorId, course.dayOfWeek, course.startTime, course.endTime);
-                        const locationAvailable = this.checkLocationAvailability(course.locationId, course.dayOfWeek, course.startTime, course.endTime);
+                        // Check if resources are available (use dayOfWeek from the current cell we're rendering)
+                        const tutorAvailable = this.checkTutorAvailability(course.tutorId, dayOfWeek, course.startTime, course.endTime);
+                        const locationAvailable = this.checkLocationAvailability(course.locationId, dayOfWeek, course.startTime, course.endTime);
                         const hasAvailabilityIssue = !tutorAvailable || !locationAvailable;
 
                         // Show indicator if there's either a conflict OR availability issue
@@ -1197,7 +1385,11 @@ class CoursePlanner {
             const courseEndWeek = course.startWeek + course.duration - 1;
             const inWeekRange = !(courseEndWeek < startWeek || course.startWeek > endWeek);
 
-            if (!inWeekRange || course.dayOfWeek !== dayOfWeek) return false;
+            // Handle both old and new day format
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
+            const runsOnThisDay = courseDays.includes(dayOfWeek);
+
+            if (!inWeekRange || !runsOnThisDay) return false;
 
             // Check if course runs during this time slot
             const [courseStartHour] = course.startTime.split(':').map(Number);
@@ -1240,8 +1432,13 @@ class CoursePlanner {
     }
 
     coursesOverlap(course1, course2) {
-        // Check if they're on the same day
-        if (course1.dayOfWeek !== course2.dayOfWeek) return false;
+        // Get days arrays for both courses (handle old single-day format)
+        const c1Days = course1.daysOfWeek || [course1.dayOfWeek];
+        const c2Days = course2.daysOfWeek || [course2.dayOfWeek];
+
+        // Check if they share any common day
+        const hasCommonDay = c1Days.some(day => c2Days.includes(day));
+        if (!hasCommonDay) return false;
 
         // Check if their week ranges overlap
         const c1EndWeek = course1.startWeek + course1.duration - 1;
@@ -1480,15 +1677,24 @@ class CoursePlanner {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${tutorCourses.map(course => `
-                                    <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="cursor: pointer;">
+                                ${tutorCourses.map(course => {
+                                    const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                                    const daysList = courseDays.map(d => days[d]).join('/');
+
+                                    // Check if this course has any conflicts
+                                    const conflicts = this.checkCourseConflicts(course);
+                                    const hasConflict = conflicts.length > 0;
+                                    const rowStyle = hasConflict ? 'background-color: #ffebee; cursor: pointer;' : 'cursor: pointer;';
+
+                                    return `
+                                    <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="${rowStyle}">
                                         <td>${course.name}</td>
-                                        <td>${days[course.dayOfWeek]}</td>
+                                        <td>${daysList}</td>
                                         <td>${course.startTime} - ${course.endTime}</td>
                                         <td>${course.startWeek}-${course.startWeek + course.duration - 1}</td>
                                         <td>${this.getLocationName(course.locationId)}</td>
                                     </tr>
-                                `).join('')}
+                                `;}).join('')}
                             </tbody>
                         </table>
                     `}
@@ -1522,15 +1728,24 @@ class CoursePlanner {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${locationCourses.map(course => `
-                                    <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="cursor: pointer;">
+                                ${locationCourses.map(course => {
+                                    const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                                    const daysList = courseDays.map(d => days[d]).join('/');
+
+                                    // Check if this course has any conflicts
+                                    const conflicts = this.checkCourseConflicts(course);
+                                    const hasConflict = conflicts.length > 0;
+                                    const rowStyle = hasConflict ? 'background-color: #ffebee; cursor: pointer;' : 'cursor: pointer;';
+
+                                    return `
+                                    <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="${rowStyle}">
                                         <td>${course.name}</td>
-                                        <td>${days[course.dayOfWeek]}</td>
+                                        <td>${daysList}</td>
                                         <td>${course.startTime} - ${course.endTime}</td>
                                         <td>${course.startWeek}-${course.startWeek + course.duration - 1}</td>
                                         <td>${this.getTutorName(course.tutorId)}</td>
                                     </tr>
-                                `).join('')}
+                                `;}).join('')}
                             </tbody>
                         </table>
                     `}
@@ -1561,17 +1776,20 @@ class CoursePlanner {
                     </tr>
                 </thead>
                 <tbody>
-                    ${sortedCourses.map(course => `
+                    ${sortedCourses.map(course => {
+                        const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                        const daysList = courseDays.map(d => days[d]).join('/');
+                        return `
                         <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="cursor: pointer;">
                             <td style="border-left: 4px solid ${course.color}">${course.name}</td>
                             <td>${this.getTutorName(course.tutorId)}</td>
                             <td>${this.getLocationName(course.locationId)}</td>
-                            <td>${days[course.dayOfWeek]}</td>
+                            <td>${daysList}</td>
                             <td>${course.startTime} - ${course.endTime}</td>
                             <td>${course.startWeek}</td>
                             <td>${course.duration} weeks</td>
                         </tr>
-                    `).join('')}
+                    `;}).join('')}
                 </tbody>
             </table>
         `;
@@ -1614,17 +1832,28 @@ class CoursePlanner {
 
         this.courses.forEach(course => {
             const issues = [];
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
 
-            // Check tutor availability
-            const tutorAvailable = this.checkTutorAvailability(course.tutorId, course.dayOfWeek, course.startTime, course.endTime);
-            if (!tutorAvailable) {
-                issues.push(`Tutor "${this.getTutorName(course.tutorId)}" not available`);
+            // Check tutor availability on all days
+            const tutorUnavailableDays = [];
+            courseDays.forEach(day => {
+                if (!this.checkTutorAvailability(course.tutorId, day, course.startTime, course.endTime)) {
+                    tutorUnavailableDays.push(days[day]);
+                }
+            });
+            if (tutorUnavailableDays.length > 0) {
+                issues.push(`Tutor "${this.getTutorName(course.tutorId)}" not available on ${tutorUnavailableDays.join(', ')}`);
             }
 
-            // Check location availability
-            const locationAvailable = this.checkLocationAvailability(course.locationId, course.dayOfWeek, course.startTime, course.endTime);
-            if (!locationAvailable) {
-                issues.push(`Location "${this.getLocationName(course.locationId)}" not available`);
+            // Check location availability on all days
+            const locationUnavailableDays = [];
+            courseDays.forEach(day => {
+                if (!this.checkLocationAvailability(course.locationId, day, course.startTime, course.endTime)) {
+                    locationUnavailableDays.push(days[day]);
+                }
+            });
+            if (locationUnavailableDays.length > 0) {
+                issues.push(`Location "${this.getLocationName(course.locationId)}" not available on ${locationUnavailableDays.join(', ')}`);
             }
 
             if (issues.length > 0) {
@@ -1655,15 +1884,18 @@ class CoursePlanner {
                         </tr>
                     </thead>
                     <tbody>
-                        ${coursesWithIssues.map(item => `
+                        ${coursesWithIssues.map(item => {
+                            const courseDays = item.course.daysOfWeek || [item.course.dayOfWeek];
+                            const daysList = courseDays.map(d => days[d]).join('/');
+                            return `
                             <tr class="clickable-row" onclick="planner.openCourseModal('${item.course.id}')" style="cursor: pointer;">
                                 <td style="border-left: 4px solid ${item.course.color}">${item.course.name}</td>
-                                <td>${days[item.course.dayOfWeek]}</td>
+                                <td>${daysList}</td>
                                 <td>${item.course.startTime} - ${item.course.endTime}</td>
                                 <td>${item.course.startWeek}-${item.course.startWeek + item.course.duration - 1}</td>
                                 <td style="color: var(--error-color);">${item.issues.join('; ')}</td>
                             </tr>
-                        `).join('')}
+                        `;}).join('')}
                     </tbody>
                 </table>
             `;
@@ -1681,13 +1913,16 @@ class CoursePlanner {
     exportToExcel() {
         // Simple CSV export that can be opened in Excel
         const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        let csv = 'Course Name,Tutor,Location,Day,Start Time,End Time,Start Week,Duration\n';
+        let csv = 'Course Name,Tutor,Location,Day(s),Start Time,End Time,Start Week,Duration\n';
 
         this.courses.forEach(course => {
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
+            const daysList = courseDays.map(d => days[d]).join('/');
+
             csv += `"${course.name}",`;
             csv += `"${this.getTutorName(course.tutorId)}",`;
             csv += `"${this.getLocationName(course.locationId)}",`;
-            csv += `"${days[course.dayOfWeek]}",`;
+            csv += `"${daysList}",`;
             csv += `"${course.startTime}",`;
             csv += `"${course.endTime}",`;
             csv += `"${course.startWeek}",`;
