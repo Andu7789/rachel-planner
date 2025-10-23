@@ -551,6 +551,14 @@ body {
     font-weight: 600;
 }
 
+/* Inline conflict indicator for upcoming items */
+.upcoming-header .conflict-indicator {
+    position: static;
+    display: inline-block;
+    margin-right: 0.3rem;
+    vertical-align: middle;
+}
+
 /* Forms */
 .form-group {
     margin-bottom: 1.2rem;
@@ -792,6 +800,17 @@ textarea.input {
     background: var(--gray-100);
 }
 
+.report-table tr.clickable-row:hover {
+    background: var(--gray-200);
+    transform: scale(1.01);
+    transition: var(--transition);
+}
+
+.conflict-course-link:hover {
+    opacity: 0.8;
+    transition: var(--transition);
+}
+
 /* Export Options */
 .export-options {
     padding: 1rem 0;
@@ -902,6 +921,12 @@ textarea.input {
 
 .availability-warning.error::before {
     content: "✕";
+}
+
+.availability-warning.clickable:hover {
+    filter: brightness(0.95);
+    transform: translateX(2px);
+    transition: var(--transition);
 }
 
 /* Utility Classes */

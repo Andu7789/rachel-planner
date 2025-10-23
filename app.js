@@ -203,11 +203,25 @@ class CoursePlanner {
             if (courseId) this.deleteCourse(courseId);
         });
         document.getElementById('btn-prev-weeks').addEventListener('click', () => {
-            const increment = this.calendarViewMode === 'week' ? 1 : 4;
+            let increment;
+            if (this.calendarViewMode === 'week') {
+                increment = 1;
+            } else if (this.calendarViewMode === 'month') {
+                increment = 4;
+            } else {
+                increment = 4; // Default for '4weeks' mode
+            }
             this.changeWeekOffset(-increment);
         });
         document.getElementById('btn-next-weeks').addEventListener('click', () => {
-            const increment = this.calendarViewMode === 'week' ? 1 : 4;
+            let increment;
+            if (this.calendarViewMode === 'week') {
+                increment = 1;
+            } else if (this.calendarViewMode === 'month') {
+                increment = 4;
+            } else {
+                increment = 4; // Default for '4weeks' mode
+            }
             this.changeWeekOffset(increment);
         });
         document.getElementById('view-mode-select').addEventListener('change', (e) => {
@@ -271,6 +285,12 @@ class CoursePlanner {
 
     closeModal(modalId) {
         document.getElementById(modalId).classList.remove('active');
+
+        // If closing any resource modal while on reports view, refresh the report
+        if (this.currentView === 'reports' &&
+            (modalId === 'modal-course' || modalId === 'modal-tutor' || modalId === 'modal-location')) {
+            this.generateReport();
+        }
     }
 
     // Dashboard Rendering
@@ -327,10 +347,17 @@ class CoursePlanner {
             const weekStart = this.getWeekStartDate(course.startWeek);
             const weekEndNum = course.startWeek + course.duration - 1;
 
+            // Check if resources are available
+            const tutorAvailable = this.checkTutorAvailability(course.tutorId, course.dayOfWeek, course.startTime, course.endTime);
+            const locationAvailable = this.checkLocationAvailability(course.locationId, course.dayOfWeek, course.startTime, course.endTime);
+            const hasAvailabilityIssue = !tutorAvailable || !locationAvailable;
+
             return `
                 <div class="upcoming-item-compact" style="border-left-color: ${course.color}; cursor: pointer;" onclick="planner.openCourseModal('${course.id}')">
                     <div class="upcoming-header">
-                        <strong style="color: ${course.color}">${course.name}</strong>
+                        <strong style="color: ${course.color}">
+                            ${hasAvailabilityIssue ? '<span class="conflict-indicator">!</span> ' : ''}${course.name}
+                        </strong>
                         <span class="upcoming-time">${days[course.dayOfWeek]} ${course.startTime}</span>
                     </div>
                     <div class="upcoming-details">
@@ -391,11 +418,35 @@ class CoursePlanner {
             return;
         }
 
-        container.innerHTML = conflicts.slice(0, 5).map(conflict => `
-            <div class="conflict-item ${conflict.type === 'error' ? 'error' : ''}">
-                <strong>${conflict.type === 'error' ? 'Error' : 'Warning'}:</strong> ${conflict.message}
-            </div>
-        `).join('');
+        container.innerHTML = conflicts.slice(0, 5).map(conflict => {
+            let displayMessage = conflict.message;
+
+            // Make course names clickable if we have course references
+            if (conflict.course1 && conflict.course2) {
+                const course1Name = conflict.course1.name;
+                const course2Name = conflict.course2.name;
+
+                // Replace first course name
+                const quote1Pattern = `"${course1Name}"`;
+                if (displayMessage.includes(quote1Pattern)) {
+                    const course1Link = `<span onclick="planner.openCourseModal('${conflict.course1.id}')" style="color: ${conflict.course1.color}; font-weight: 600; cursor: pointer; text-decoration: underline;">"${course1Name}"</span>`;
+                    displayMessage = displayMessage.replace(quote1Pattern, course1Link);
+                }
+
+                // Replace second course name
+                const quote2Pattern = `"${course2Name}"`;
+                if (displayMessage.includes(quote2Pattern)) {
+                    const course2Link = `<span onclick="planner.openCourseModal('${conflict.course2.id}')" style="color: ${conflict.course2.color}; font-weight: 600; cursor: pointer; text-decoration: underline;">"${course2Name}"</span>`;
+                    displayMessage = displayMessage.replace(quote2Pattern, course2Link);
+                }
+            }
+
+            return `
+                <div class="conflict-item ${conflict.type === 'error' ? 'error' : ''}">
+                    <strong>${conflict.type === 'error' ? 'Error' : 'Warning'}:</strong> ${displayMessage}
+                </div>
+            `;
+        }).join('');
     }
 
     // Tutor Management
@@ -824,6 +875,11 @@ class CoursePlanner {
         }
 
         this.openModal('modal-course');
+
+        // Focus on course name field to bring modal to top
+        setTimeout(() => {
+            document.getElementById('course-name').focus();
+        }, 150);
     }
 
     updateColorPreview(color) {
@@ -858,10 +914,17 @@ class CoursePlanner {
                 tutorWarning.className = 'availability-warning success';
                 tutorWarning.textContent = `${tutorName} is available on ${days[dayOfWeek]} at this time`;
                 tutorWarning.style.display = 'flex';
+                tutorWarning.style.cursor = 'default';
+                tutorWarning.onclick = null;
             } else {
-                tutorWarning.className = 'availability-warning warning';
-                tutorWarning.textContent = `${tutorName} is NOT marked as available on ${days[dayOfWeek]} during ${startTime}-${endTime}`;
+                tutorWarning.className = 'availability-warning warning clickable';
+                tutorWarning.innerHTML = `${tutorName} is NOT marked as available on ${days[dayOfWeek]} during ${startTime}-${endTime} <span style="font-size: 0.85em; opacity: 0.8;">(click to edit)</span>`;
                 tutorWarning.style.display = 'flex';
+                tutorWarning.style.cursor = 'pointer';
+                tutorWarning.onclick = () => {
+                    this.closeModal('modal-course');
+                    this.openTutorModal(tutorId);
+                };
             }
         } else {
             tutorWarning.style.display = 'none';
@@ -877,10 +940,17 @@ class CoursePlanner {
                 locationWarning.className = 'availability-warning success';
                 locationWarning.textContent = `${locationName} is available on ${days[dayOfWeek]} at this time`;
                 locationWarning.style.display = 'flex';
+                locationWarning.style.cursor = 'default';
+                locationWarning.onclick = null;
             } else {
-                locationWarning.className = 'availability-warning warning';
-                locationWarning.textContent = `${locationName} is NOT marked as available on ${days[dayOfWeek]} during ${startTime}-${endTime}`;
+                locationWarning.className = 'availability-warning warning clickable';
+                locationWarning.innerHTML = `${locationName} is NOT marked as available on ${days[dayOfWeek]} during ${startTime}-${endTime} <span style="font-size: 0.85em; opacity: 0.8;">(click to edit)</span>`;
                 locationWarning.style.display = 'flex';
+                locationWarning.style.cursor = 'pointer';
+                locationWarning.onclick = () => {
+                    this.closeModal('modal-course');
+                    this.openLocationModal(locationId);
+                };
             }
         } else {
             locationWarning.style.display = 'none';
@@ -903,7 +973,23 @@ class CoursePlanner {
 
             if (conflicts.length > 0) {
                 conflictWarning.className = 'availability-warning error';
-                conflictWarning.innerHTML = `<strong>Conflicts detected:</strong><br>${conflicts.join('<br>')}`;
+                conflictWarning.style.cursor = 'default';
+
+                // Create clickable conflict messages
+                const conflictHtml = conflicts.map(c => {
+                    const courseName = c.conflictingCourse.name;
+                    const courseColor = c.conflictingCourse.color;
+                    const courseId = c.conflictingCourse.id;
+
+                    // Parse the message to insert clickable course name
+                    let message = c.message;
+                    const quotePattern = `"${courseName}"`;
+                    const parts = message.split(quotePattern);
+
+                    return `<div style="margin-bottom: 0.3rem;">${parts[0]}<span onclick="planner.closeModal('modal-course'); planner.openCourseModal('${courseId}');" style="color: ${courseColor}; font-weight: 600; cursor: pointer; text-decoration: underline; white-space: nowrap;">"${courseName}"</span>${parts[1] || ''}</div>`;
+                }).join('');
+
+                conflictWarning.innerHTML = `<div><strong>Conflicts detected:</strong>${conflictHtml}<div style="font-size: 0.85em; opacity: 0.8; margin-top: 0.3rem;">(click course name to edit)</div></div>`;
                 conflictWarning.style.display = 'flex';
             } else {
                 conflictWarning.style.display = 'none';
@@ -965,7 +1051,7 @@ class CoursePlanner {
         // Check for double-booking conflicts
         const conflicts = this.checkCourseConflicts(course);
         if (conflicts.length > 0) {
-            const conflictMessages = conflicts.map(c => `- ${c}`).join('\n');
+            const conflictMessages = conflicts.map(c => `- ${c.message}`).join('\n');
             if (!confirm(`WARNING: This course creates the following conflicts:\n\n${conflictMessages}\n\nDo you want to schedule this course anyway?`)) {
                 return;
             }
@@ -1010,7 +1096,14 @@ class CoursePlanner {
 
     renderCalendar() {
         const container = document.getElementById('calendar-grid');
-        const weeksToShow = this.calendarViewMode === 'week' ? 1 : 4;
+        let weeksToShow;
+        if (this.calendarViewMode === 'week') {
+            weeksToShow = 1;
+        } else if (this.calendarViewMode === 'month') {
+            weeksToShow = 4;
+        } else {
+            weeksToShow = 4; // Default for '4weeks' mode
+        }
         const startWeek = this.calendarWeekOffset + 1;
         const endWeek = startWeek + weeksToShow - 1;
 
@@ -1055,11 +1148,19 @@ class CoursePlanner {
                         // Check if this specific course has a conflict
                         const courseHasConflict = this.checkCourseConflicts(course).length > 0;
 
+                        // Check if resources are available
+                        const tutorAvailable = this.checkTutorAvailability(course.tutorId, course.dayOfWeek, course.startTime, course.endTime);
+                        const locationAvailable = this.checkLocationAvailability(course.locationId, course.dayOfWeek, course.startTime, course.endTime);
+                        const hasAvailabilityIssue = !tutorAvailable || !locationAvailable;
+
+                        // Show indicator if there's either a conflict OR availability issue
+                        const hasIssue = courseHasConflict || hasAvailabilityIssue;
+
                         html += `
-                            <div class="course-block ${courseHasConflict ? 'conflict' : ''}"
+                            <div class="course-block ${hasIssue ? 'conflict' : ''}"
                                  style="background-color: ${course.color}20; border-left-color: ${course.color}"
                                  onclick="planner.openCourseModal('${course.id}')">
-                                ${courseHasConflict ? '<span class="conflict-indicator">!</span>' : ''}
+                                ${hasIssue ? '<span class="conflict-indicator">!</span>' : ''}
                                 <span class="course-name">${course.name}</span>
                                 <div class="course-details">
                                     ${tutor ? tutor.name : 'No tutor'} | ${location ? location.name : 'No location'}
@@ -1117,14 +1218,18 @@ class CoursePlanner {
                     if (course.tutorId === otherCourse.tutorId) {
                         conflicts.push({
                             type: 'error',
-                            message: `Tutor ${this.getTutorName(course.tutorId)} is double-booked: "${course.name}" and "${otherCourse.name}"`
+                            message: `Tutor ${this.getTutorName(course.tutorId)} is double-booked: "${course.name}" and "${otherCourse.name}"`,
+                            course1: course,
+                            course2: otherCourse
                         });
                     }
 
                     if (course.locationId === otherCourse.locationId) {
                         conflicts.push({
                             type: 'error',
-                            message: `Location ${this.getLocationName(course.locationId)} is double-booked: "${course.name}" and "${otherCourse.name}"`
+                            message: `Location ${this.getLocationName(course.locationId)} is double-booked: "${course.name}" and "${otherCourse.name}"`,
+                            course1: course,
+                            course2: otherCourse
                         });
                     }
                 }
@@ -1181,13 +1286,19 @@ class CoursePlanner {
                 // Check for tutor conflict
                 if (newCourse.tutorId === existingCourse.tutorId) {
                     const tutorName = this.getTutorName(newCourse.tutorId);
-                    conflicts.push(`Tutor "${tutorName}" is already teaching "${existingCourse.name}" at this time`);
+                    conflicts.push({
+                        message: `Tutor "${tutorName}" is already teaching "${existingCourse.name}" at this time`,
+                        conflictingCourse: existingCourse
+                    });
                 }
 
                 // Check for location conflict
                 if (newCourse.locationId === existingCourse.locationId) {
                     const locationName = this.getLocationName(newCourse.locationId);
-                    conflicts.push(`Location "${locationName}" is already being used for "${existingCourse.name}" at this time`);
+                    conflicts.push({
+                        message: `Location "${locationName}" is already being used for "${existingCourse.name}" at this time`,
+                        conflictingCourse: existingCourse
+                    });
                 }
             }
         });
@@ -1340,6 +1451,9 @@ class CoursePlanner {
             case 'conflicts':
                 this.generateConflictsReport(container);
                 break;
+            case 'unavailable-resources':
+                this.generateUnavailableResourcesReport(container);
+                break;
         }
     }
 
@@ -1367,7 +1481,7 @@ class CoursePlanner {
                             </thead>
                             <tbody>
                                 ${tutorCourses.map(course => `
-                                    <tr>
+                                    <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="cursor: pointer;">
                                         <td>${course.name}</td>
                                         <td>${days[course.dayOfWeek]}</td>
                                         <td>${course.startTime} - ${course.endTime}</td>
@@ -1409,7 +1523,7 @@ class CoursePlanner {
                             </thead>
                             <tbody>
                                 ${locationCourses.map(course => `
-                                    <tr>
+                                    <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="cursor: pointer;">
                                         <td>${course.name}</td>
                                         <td>${days[course.dayOfWeek]}</td>
                                         <td>${course.startTime} - ${course.endTime}</td>
@@ -1448,7 +1562,7 @@ class CoursePlanner {
                 </thead>
                 <tbody>
                     ${sortedCourses.map(course => `
-                        <tr>
+                        <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="cursor: pointer;">
                             <td style="border-left: 4px solid ${course.color}">${course.name}</td>
                             <td>${this.getTutorName(course.tutorId)}</td>
                             <td>${this.getLocationName(course.locationId)}</td>
@@ -1474,12 +1588,86 @@ class CoursePlanner {
                 '<p style="color: var(--success-color); font-size: 1.2rem;">No conflicts detected!</p>' :
                 `<div style="background: #fff3cd; padding: 1rem; border-radius: 8px; border-left: 4px solid var(--warning-color);">
                     <p><strong>${conflicts.length} conflict(s) found:</strong></p>
-                    <ul>
-                        ${conflicts.map(c => `<li>${c.message}</li>`).join('')}
+                    <ul style="list-style: none; padding-left: 0;">
+                        ${conflicts.map(c => {
+                            // Replace course names with clickable links
+                            let message = c.message;
+                            if (c.course1 && c.course2) {
+                                const course1Link = `<span class="conflict-course-link" onclick="planner.openCourseModal('${c.course1.id}')" style="color: ${c.course1.color}; font-weight: 600; cursor: pointer; text-decoration: underline;">"${c.course1.name}"</span>`;
+                                const course2Link = `<span class="conflict-course-link" onclick="planner.openCourseModal('${c.course2.id}')" style="color: ${c.course2.color}; font-weight: 600; cursor: pointer; text-decoration: underline;">"${c.course2.name}"</span>`;
+                                message = message.replace(`"${c.course1.name}"`, course1Link);
+                                message = message.replace(`"${c.course2.name}"`, course2Link);
+                            }
+                            return `<li style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">${message}</li>`;
+                        }).join('')}
                     </ul>
                 </div>`
             }
         `;
+
+        container.innerHTML = html;
+    }
+
+    generateUnavailableResourcesReport(container) {
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const coursesWithIssues = [];
+
+        this.courses.forEach(course => {
+            const issues = [];
+
+            // Check tutor availability
+            const tutorAvailable = this.checkTutorAvailability(course.tutorId, course.dayOfWeek, course.startTime, course.endTime);
+            if (!tutorAvailable) {
+                issues.push(`Tutor "${this.getTutorName(course.tutorId)}" not available`);
+            }
+
+            // Check location availability
+            const locationAvailable = this.checkLocationAvailability(course.locationId, course.dayOfWeek, course.startTime, course.endTime);
+            if (!locationAvailable) {
+                issues.push(`Location "${this.getLocationName(course.locationId)}" not available`);
+            }
+
+            if (issues.length > 0) {
+                coursesWithIssues.push({
+                    course,
+                    issues
+                });
+            }
+        });
+
+        let html = '<h3>Courses with Unavailable Resources</h3>';
+
+        if (coursesWithIssues.length === 0) {
+            html += '<p style="color: var(--success-color); font-size: 1.2rem;">All courses have available resources!</p>';
+        } else {
+            html += `
+                <div style="background: #fff3cd; padding: 1rem; border-radius: 8px; border-left: 4px solid var(--warning-color); margin-bottom: 1rem;">
+                    <p><strong>${coursesWithIssues.length} course(s) scheduled with unavailable resources</strong></p>
+                </div>
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th>Course Name</th>
+                            <th>Day</th>
+                            <th>Time</th>
+                            <th>Weeks</th>
+                            <th>Issues</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${coursesWithIssues.map(item => `
+                            <tr class="clickable-row" onclick="planner.openCourseModal('${item.course.id}')" style="cursor: pointer;">
+                                <td style="border-left: 4px solid ${item.course.color}">${item.course.name}</td>
+                                <td>${days[item.course.dayOfWeek]}</td>
+                                <td>${item.course.startTime} - ${item.course.endTime}</td>
+                                <td>${item.course.startWeek}-${item.course.startWeek + item.course.duration - 1}</td>
+                                <td style="color: var(--error-color);">${item.issues.join('; ')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
 
         container.innerHTML = html;
     }
