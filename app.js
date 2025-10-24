@@ -11,6 +11,10 @@ class CoursePlanner {
         this.calendarViewMode = '4weeks';
         this.editingId = null;
         this.week1StartDate = null;
+        this.settings = {
+            fundedCourseColor: '#4CAF50',    // Green for funded
+            nonFundedCourseColor: '#2196F3'  // Blue for non-funded
+        };
 
         this.init();
     }
@@ -30,6 +34,10 @@ class CoursePlanner {
             this.locations = data.locations || [];
             this.courses = data.courses || [];
             this.week1StartDate = data.week1StartDate || null;
+            this.settings = data.settings || {
+                fundedCourseColor: '#4CAF50',
+                nonFundedCourseColor: '#2196F3'
+            };
 
             // Migrate old data if needed
             this.migrateOldAvailabilityData();
@@ -68,6 +76,12 @@ class CoursePlanner {
                 tutor._migrated = true;
                 needsSave = true;
             }
+
+            // Initialize canTeach array if it doesn't exist
+            if (!tutor.canTeach) {
+                tutor.canTeach = [];
+                needsSave = true;
+            }
         });
 
         // Migrate locations
@@ -88,6 +102,15 @@ class CoursePlanner {
             }
         });
 
+        // Migrate courses
+        this.courses.forEach(course => {
+            // Initialize qualifiedTutors array if it doesn't exist
+            if (!course.qualifiedTutors) {
+                course.qualifiedTutors = [];
+                needsSave = true;
+            }
+        });
+
         if (needsSave) {
             this.saveData();
         }
@@ -98,7 +121,8 @@ class CoursePlanner {
             tutors: this.tutors,
             locations: this.locations,
             courses: this.courses,
-            week1StartDate: this.week1StartDate
+            week1StartDate: this.week1StartDate,
+            settings: this.settings
         };
         localStorage.setItem('coursePlannerData', JSON.stringify(data));
     }
@@ -240,6 +264,18 @@ class CoursePlanner {
             }
         });
 
+        // Course search
+        document.getElementById('course-search').addEventListener('input', (e) => {
+            this.filterCoursesBySearch(e.target.value);
+        });
+
+        // Navigation buttons
+        document.getElementById('btn-today').addEventListener('click', () => this.jumpToToday());
+        document.getElementById('btn-jump-to-week').addEventListener('click', () => this.jumpToWeekPrompt());
+
+        // Duplicate course button
+        document.getElementById('btn-duplicate-course').addEventListener('click', () => this.duplicateCourse());
+
         // Course form availability checking
         const courseFormInputs = ['course-tutor', 'course-location', 'course-day', 'course-start-time', 'course-end-time', 'course-start-week', 'course-duration'];
         courseFormInputs.forEach(inputId => {
@@ -262,6 +298,21 @@ class CoursePlanner {
             this.renderDashboard();
         });
 
+        // Color settings
+        document.getElementById('funded-color').addEventListener('change', (e) => {
+            this.settings.fundedCourseColor = e.target.value;
+            this.updateColorPreviews();
+            this.saveData();
+            if (this.currentView === 'courses') this.renderCalendar();
+        });
+
+        document.getElementById('non-funded-color').addEventListener('change', (e) => {
+            this.settings.nonFundedCourseColor = e.target.value;
+            this.updateColorPreviews();
+            this.saveData();
+            if (this.currentView === 'courses') this.renderCalendar();
+        });
+
         // Reports
         document.getElementById('btn-generate-report').addEventListener('click', () => this.generateReport());
 
@@ -269,7 +320,12 @@ class CoursePlanner {
         document.getElementById('btn-export-pdf').addEventListener('click', () => this.exportToPDF());
         document.getElementById('btn-export-excel').addEventListener('click', () => this.exportToExcel());
         document.getElementById('btn-export-json').addEventListener('click', () => this.exportToJSON());
-        document.getElementById('btn-import-json').addEventListener('click', () => this.importFromJSON());
+        document.getElementById('btn-export-ai').addEventListener('click', () => this.exportForAI());
+        document.getElementById('btn-paste-json').addEventListener('click', () => this.openPasteJsonModal());
+        document.getElementById('btn-import-file').addEventListener('click', () => document.getElementById('input-import-json').click());
+        document.getElementById('input-import-json').addEventListener('change', () => this.importFromJSON());
+        document.getElementById('btn-process-paste').addEventListener('click', () => this.processPastedJSON());
+        document.getElementById('btn-undo-import').addEventListener('click', () => this.restoreBackup());
 
         // Modal close buttons
         document.querySelectorAll('.btn-close, .btn[data-modal]').forEach(btn => {
@@ -314,6 +370,11 @@ class CoursePlanner {
         const conflicts = this.detectAllConflicts();
         document.getElementById('stat-conflicts').textContent = conflicts.length;
 
+        // Initialize color pickers
+        document.getElementById('funded-color').value = this.settings.fundedCourseColor;
+        document.getElementById('non-funded-color').value = this.settings.nonFundedCourseColor;
+        this.updateColorPreviews();
+
         // Render upcoming courses
         this.renderUpcomingCourses();
 
@@ -322,6 +383,23 @@ class CoursePlanner {
 
         // Render conflicts
         this.renderConflictsList(conflicts);
+    }
+
+    updateColorPreviews() {
+        const fundedPreview = document.getElementById('funded-color-preview');
+        const nonFundedPreview = document.getElementById('non-funded-color-preview');
+
+        if (fundedPreview) {
+            fundedPreview.style.backgroundColor = this.settings.fundedCourseColor + '40';
+            fundedPreview.style.borderLeft = `4px solid ${this.settings.fundedCourseColor}`;
+            fundedPreview.textContent = 'Funded Course Preview';
+        }
+
+        if (nonFundedPreview) {
+            nonFundedPreview.style.backgroundColor = this.settings.nonFundedCourseColor + '40';
+            nonFundedPreview.style.borderLeft = `4px solid ${this.settings.nonFundedCourseColor}`;
+            nonFundedPreview.textContent = 'Non-Funded Course Preview';
+        }
     }
 
     renderUpcomingCourses() {
@@ -502,13 +580,57 @@ class CoursePlanner {
 
                 // Load custom availability
                 this.renderCustomAvailability('tutor', tutor.customAvailability || []);
+
+                // Populate course checkboxes
+                this.populateTutorCanTeach(tutor.canTeach || []);
             }
         } else {
             document.getElementById('tutor-modal-title').textContent = 'Add Tutor';
             this.renderCustomAvailability('tutor', []);
+            this.populateTutorCanTeach([]);
         }
 
         this.openModal('modal-tutor');
+    }
+
+    populateTutorCanTeach(canTeachIds) {
+        const container = document.getElementById('tutor-can-teach');
+
+        if (this.courses.length === 0) {
+            container.innerHTML = '<p style="color: var(--gray-500); font-size: 0.9em; margin: 0;">No courses created yet</p>';
+            return;
+        }
+
+        container.innerHTML = this.courses.map(course => `
+            <label style="display: flex; align-items: center; padding: 0.3rem; cursor: pointer;"
+                   onmouseover="this.style.background='var(--gray-100)'"
+                   onmouseout="this.style.background='transparent'">
+                <input type="checkbox" name="tutor-course" value="${course.id}"
+                       ${canTeachIds.includes(course.id) ? 'checked' : ''}
+                       style="margin-right: 0.5rem;">
+                <span>${course.name}</span>
+            </label>
+        `).join('');
+    }
+
+    populateCourseQualifiedTutors(qualifiedTutorIds) {
+        const container = document.getElementById('course-qualified-tutors');
+
+        if (this.tutors.length === 0) {
+            container.innerHTML = '<p style="color: var(--gray-500); font-size: 0.9em; margin: 0;">No tutors created yet</p>';
+            return;
+        }
+
+        container.innerHTML = this.tutors.map(tutor => `
+            <label style="display: flex; align-items: center; padding: 0.3rem; cursor: pointer;"
+                   onmouseover="this.style.background='var(--gray-100)'"
+                   onmouseout="this.style.background='transparent'">
+                <input type="checkbox" name="course-tutor-qualified" value="${tutor.id}"
+                       ${qualifiedTutorIds.includes(tutor.id) ? 'checked' : ''}
+                       style="margin-right: 0.5rem;">
+                <span>${tutor.name}</span>
+            </label>
+        `).join('');
     }
 
     renderRecurringAvailability(type) {
@@ -620,6 +742,12 @@ class CoursePlanner {
             });
         });
 
+        // Get canTeach (selected courses)
+        const canTeach = [];
+        document.querySelectorAll('input[name="tutor-course"]:checked').forEach(checkbox => {
+            canTeach.push(checkbox.value);
+        });
+
         const tutor = {
             id: tutorId,
             name,
@@ -627,7 +755,8 @@ class CoursePlanner {
             phone,
             skills,
             recurringAvailability,
-            customAvailability
+            customAvailability,
+            canTeach
         };
 
         const existingIndex = this.tutors.findIndex(t => t.id === tutorId);
@@ -637,10 +766,49 @@ class CoursePlanner {
             this.tutors.push(tutor);
         }
 
+        // Sync: Update qualifiedTutors in courses based on this tutor's canTeach
+        this.syncTutorToCourses(tutorId, canTeach);
+
         this.saveData();
         this.closeModal('modal-tutor');
         this.renderTutors();
         if (this.currentView === 'dashboard') this.renderDashboard();
+    }
+
+    syncTutorToCourses(tutorId, canTeachCourseIds) {
+        // For each course, add or remove this tutor from qualifiedTutors
+        this.courses.forEach(course => {
+            if (!course.qualifiedTutors) course.qualifiedTutors = [];
+
+            const isQualified = canTeachCourseIds.includes(course.id);
+            const isInList = course.qualifiedTutors.includes(tutorId);
+
+            if (isQualified && !isInList) {
+                // Add tutor to this course's qualified list
+                course.qualifiedTutors.push(tutorId);
+            } else if (!isQualified && isInList) {
+                // Remove tutor from this course's qualified list
+                course.qualifiedTutors = course.qualifiedTutors.filter(id => id !== tutorId);
+            }
+        });
+    }
+
+    syncCourseToTutors(courseId, qualifiedTutorIds) {
+        // For each tutor, add or remove this course from canTeach
+        this.tutors.forEach(tutor => {
+            if (!tutor.canTeach) tutor.canTeach = [];
+
+            const canTeachThis = qualifiedTutorIds.includes(tutor.id);
+            const isInList = tutor.canTeach.includes(courseId);
+
+            if (canTeachThis && !isInList) {
+                // Add course to this tutor's canTeach list
+                tutor.canTeach.push(courseId);
+            } else if (!canTeachThis && isInList) {
+                // Remove course from this tutor's canTeach list
+                tutor.canTeach = tutor.canTeach.filter(id => id !== courseId);
+            }
+        });
     }
 
     renderTutors() {
@@ -855,11 +1023,13 @@ class CoursePlanner {
         // Populate tutor dropdown
         const tutorSelect = document.getElementById('course-tutor');
         tutorSelect.innerHTML = '<option value="">Select Tutor</option>' +
+            '<option value="none">No Tutor Yet</option>' +
             this.tutors.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
 
         // Populate location dropdown
         const locationSelect = document.getElementById('course-location');
         locationSelect.innerHTML = '<option value="">Select Location</option>' +
+            '<option value="none">No Location Yet</option>' +
             this.locations.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
 
         if (courseId) {
@@ -886,8 +1056,12 @@ class CoursePlanner {
                 document.getElementById('course-end-time').value = course.endTime;
                 document.getElementById('course-notes').value = course.notes || '';
 
-                // Show delete button for existing courses
+                // Populate qualified tutors checkboxes
+                this.populateCourseQualifiedTutors(course.qualifiedTutors || []);
+
+                // Show delete and duplicate buttons for existing courses
                 document.getElementById('btn-delete-course').style.display = 'block';
+                document.getElementById('btn-duplicate-course').style.display = 'block';
 
                 // Check availability with current values
                 setTimeout(() => this.checkCourseFormAvailability(), 100);
@@ -904,8 +1078,12 @@ class CoursePlanner {
                 checkbox.checked = false;
             });
 
-            // Hide delete button for new courses
+            // Populate qualified tutors checkboxes (empty for new course)
+            this.populateCourseQualifiedTutors([]);
+
+            // Hide delete and duplicate buttons for new courses
             document.getElementById('btn-delete-course').style.display = 'none';
+            document.getElementById('btn-duplicate-course').style.display = 'none';
         }
 
         this.openModal('modal-course');
@@ -944,8 +1122,15 @@ class CoursePlanner {
         const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
         // Check tutor availability for all selected days
-        if (tutorId && daysOfWeek.length > 0 && startTime && endTime) {
+        if (tutorId && tutorId !== 'none' && daysOfWeek.length > 0 && startTime && endTime) {
             const tutorName = this.getTutorName(tutorId);
+            const courseId = document.getElementById('course-id').value;
+            const course = courseId ? this.courses.find(c => c.id === courseId) : null;
+            const qualifiedTutorIds = course ? (course.qualifiedTutors || []) : [];
+
+            // Check if tutor is qualified
+            const isQualified = qualifiedTutorIds.length === 0 || qualifiedTutorIds.includes(tutorId);
+
             const tutorUnavailableDays = [];
 
             daysOfWeek.forEach(day => {
@@ -954,7 +1139,14 @@ class CoursePlanner {
                 }
             });
 
-            if (tutorUnavailableDays.length === 0) {
+            if (!isQualified) {
+                // Tutor is not qualified - show error
+                tutorWarning.className = 'availability-warning error';
+                tutorWarning.textContent = `${tutorName} is NOT qualified to teach this course. Please select a qualified tutor from the "Qualified Tutors" list below.`;
+                tutorWarning.style.display = 'flex';
+                tutorWarning.style.cursor = 'default';
+                tutorWarning.onclick = null;
+            } else if (tutorUnavailableDays.length === 0) {
                 tutorWarning.className = 'availability-warning success';
                 const daysList = daysOfWeek.map(d => days[d]).join(', ');
                 tutorWarning.textContent = `${tutorName} is available on ${daysList} at this time`;
@@ -962,9 +1154,18 @@ class CoursePlanner {
                 tutorWarning.style.cursor = 'default';
                 tutorWarning.onclick = null;
             } else {
-                // Find available tutors
+                // Find available AND qualified tutors
+                const courseId = document.getElementById('course-id').value;
+                const course = courseId ? this.courses.find(c => c.id === courseId) : null;
+                const qualifiedTutorIds = course ? (course.qualifiedTutors || []) : [];
+
                 const availableTutors = this.tutors.filter(tutor => {
                     if (tutor.id === tutorId) return false; // Skip current tutor
+
+                    // Check if tutor is qualified for this course
+                    const isQualified = qualifiedTutorIds.length === 0 || qualifiedTutorIds.includes(tutor.id);
+                    if (!isQualified) return false;
+
                     // Check if tutor is available on ALL selected days
                     return daysOfWeek.every(day =>
                         this.checkTutorAvailability(tutor.id, day, startTime, endTime)
@@ -1020,7 +1221,7 @@ class CoursePlanner {
         }
 
         // Check location availability for all selected days
-        if (locationId && daysOfWeek.length > 0 && startTime && endTime) {
+        if (locationId && locationId !== 'none' && daysOfWeek.length > 0 && startTime && endTime) {
             const locationName = this.getLocationName(locationId);
             const locationUnavailableDays = [];
 
@@ -1163,6 +1364,12 @@ class CoursePlanner {
         const endTime = document.getElementById('course-end-time').value;
         const notes = document.getElementById('course-notes').value;
 
+        // Get qualified tutors (selected tutors)
+        const qualifiedTutors = [];
+        document.querySelectorAll('input[name="course-tutor-qualified"]:checked').forEach(checkbox => {
+            qualifiedTutors.push(checkbox.value);
+        });
+
         const course = {
             id: courseId,
             name,
@@ -1175,7 +1382,8 @@ class CoursePlanner {
             daysOfWeek, // Array of days instead of single dayOfWeek
             startTime,
             endTime,
-            notes
+            notes,
+            qualifiedTutors
         };
 
         // Check tutor availability for all selected days
@@ -1223,6 +1431,9 @@ class CoursePlanner {
             this.courses.push(course);
         }
 
+        // Sync: Update canTeach in tutors based on this course's qualifiedTutors
+        this.syncCourseToTutors(courseId, qualifiedTutors);
+
         this.saveData();
         this.closeModal('modal-course');
 
@@ -1253,6 +1464,154 @@ class CoursePlanner {
         if (this.calendarWeekOffset < 0) this.calendarWeekOffset = 0;
         if (this.calendarWeekOffset > 36) this.calendarWeekOffset = 36; // Max offset 36 = Week 37-40 visible
         this.renderCalendar();
+    }
+
+    jumpToToday() {
+        const currentWeek = this.getCurrentWeek();
+        if (!currentWeek) {
+            alert('Please set Week 1 start date in the Dashboard first');
+            return;
+        }
+
+        // Calculate which offset shows the current week
+        if (this.calendarViewMode === 'week') {
+            this.calendarWeekOffset = currentWeek - 1;
+        } else if (this.calendarViewMode === '4weeks') {
+            // Show current week in the first 4-week block that contains it
+            this.calendarWeekOffset = Math.floor((currentWeek - 1) / 4) * 4;
+        } else if (this.calendarViewMode === 'month') {
+            // Show current week in the first month block that contains it
+            this.calendarWeekOffset = Math.floor((currentWeek - 1) / 16) * 16;
+        }
+
+        // Ensure within bounds
+        if (this.calendarWeekOffset < 0) this.calendarWeekOffset = 0;
+        if (this.calendarWeekOffset > 36) this.calendarWeekOffset = 36;
+
+        this.renderCalendar();
+    }
+
+    jumpToWeekPrompt() {
+        const weekNum = prompt('Jump to week (1-40):');
+        if (!weekNum) return;
+
+        const targetWeek = parseInt(weekNum);
+        if (isNaN(targetWeek) || targetWeek < 1 || targetWeek > 40) {
+            alert('Please enter a valid week number between 1 and 40');
+            return;
+        }
+
+        // Calculate offset to show the target week
+        if (this.calendarViewMode === 'week') {
+            this.calendarWeekOffset = targetWeek - 1;
+        } else if (this.calendarViewMode === '4weeks') {
+            this.calendarWeekOffset = Math.floor((targetWeek - 1) / 4) * 4;
+        } else if (this.calendarViewMode === 'month') {
+            this.calendarWeekOffset = Math.floor((targetWeek - 1) / 16) * 16;
+        }
+
+        // Ensure within bounds
+        if (this.calendarWeekOffset < 0) this.calendarWeekOffset = 0;
+        if (this.calendarWeekOffset > 36) this.calendarWeekOffset = 36;
+
+        this.renderCalendar();
+    }
+
+    filterCoursesBySearch(searchTerm) {
+        const term = searchTerm.toLowerCase().trim();
+        if (!term) {
+            // Clear filter - show all courses
+            document.querySelectorAll('.course-block').forEach(block => {
+                block.style.display = '';
+            });
+            return;
+        }
+
+        // Find all matching courses in the data
+        const matchingCourses = this.courses.filter(course =>
+            course.name.toLowerCase().includes(term)
+        );
+
+        if (matchingCourses.length === 0) {
+            alert('No courses found matching: ' + searchTerm);
+            return;
+        }
+
+        // Find the earliest week with a matching course
+        const earliestWeek = Math.min(...matchingCourses.map(c => c.startWeek));
+
+        // Jump to that week if not currently visible
+        const startWeek = this.calendarWeekOffset + 1;
+        let weeksToShow = 4;
+        if (this.calendarViewMode === 'week') {
+            weeksToShow = 1;
+        } else if (this.calendarViewMode === 'month') {
+            weeksToShow = 4;
+        }
+        const endWeek = startWeek + weeksToShow - 1;
+
+        // If the earliest matching course is not in the current view, jump to it
+        if (earliestWeek < startWeek || earliestWeek > endWeek) {
+            if (this.calendarViewMode === 'week') {
+                this.calendarWeekOffset = earliestWeek - 1;
+            } else if (this.calendarViewMode === '4weeks') {
+                this.calendarWeekOffset = Math.floor((earliestWeek - 1) / 4) * 4;
+            } else if (this.calendarViewMode === 'month') {
+                this.calendarWeekOffset = Math.floor((earliestWeek - 1) / 16) * 16;
+            }
+            this.renderCalendar();
+        }
+
+        // Filter course blocks to show only matches
+        document.querySelectorAll('.course-block').forEach(block => {
+            const courseName = block.querySelector('.course-name').textContent.toLowerCase();
+            const courseDetails = block.querySelector('.course-details')?.textContent.toLowerCase() || '';
+
+            if (courseName.includes(term) || courseDetails.includes(term)) {
+                block.style.display = '';
+            } else {
+                block.style.display = 'none';
+            }
+        });
+    }
+
+    duplicateCourse() {
+        const courseId = document.getElementById('course-id').value;
+        if (!courseId) {
+            alert('No course to duplicate');
+            return;
+        }
+
+        const course = this.courses.find(c => c.id === courseId);
+        if (!course) {
+            alert('Course not found');
+            return;
+        }
+
+        // Close current modal
+        this.closeModal('modal-course');
+
+        // Create a copy with a new ID
+        const newCourse = {
+            ...course,
+            id: this.generateId(),
+            name: course.name + ' (Copy)'
+        };
+
+        // Add to courses array
+        this.courses.push(newCourse);
+        this.saveData();
+
+        // Sync qualifications
+        this.syncCourseToTutors(newCourse.id, newCourse.qualifiedTutors || []);
+        this.saveData();
+
+        // Re-render and open the new course for editing
+        this.renderCalendar();
+        this.populateCourseSelector();
+        this.openCourseModal(newCourse.id);
+
+        alert(`Course duplicated! You can now modify "${newCourse.name}"`);
     }
 
     populateCourseSelector() {
@@ -1337,16 +1696,36 @@ class CoursePlanner {
                         const courseHasConflict = this.checkCourseConflicts(course).length > 0;
 
                         // Check if resources are available (use dayOfWeek from the current cell we're rendering)
-                        const tutorAvailable = this.checkTutorAvailability(course.tutorId, dayOfWeek, course.startTime, course.endTime);
-                        const locationAvailable = this.checkLocationAvailability(course.locationId, dayOfWeek, course.startTime, course.endTime);
+                        const tutorAvailable = course.tutorId === 'none' || this.checkTutorAvailability(course.tutorId, dayOfWeek, course.startTime, course.endTime);
+                        const locationAvailable = course.locationId === 'none' || this.checkLocationAvailability(course.locationId, dayOfWeek, course.startTime, course.endTime);
                         const hasAvailabilityIssue = !tutorAvailable || !locationAvailable;
 
-                        // Show indicator if there's either a conflict OR availability issue
-                        const hasIssue = courseHasConflict || hasAvailabilityIssue;
+                        // Check if tutor is qualified
+                        const qualifiedTutors = course.qualifiedTutors || [];
+                        const hasQualificationIssue = course.tutorId && course.tutorId !== 'none' &&
+                                                       qualifiedTutors.length > 0 &&
+                                                       !qualifiedTutors.includes(course.tutorId);
+
+                        // Show indicator if there's a conflict, availability issue, OR qualification issue
+                        const hasIssue = courseHasConflict || hasAvailabilityIssue || hasQualificationIssue;
+
+                        // Use course custom color for background and left border
+                        const courseColor = course.color;
+
+                        // Use funded/non-funded color for top and right borders
+                        const fundedColor = course.funded
+                            ? this.settings.fundedCourseColor
+                            : this.settings.nonFundedCourseColor;
+
+                        // Use dashed borders for non-funded courses
+                        const borderStyle = course.funded ? 'solid' : 'dashed';
 
                         html += `
                             <div class="course-block ${hasIssue ? 'conflict' : ''}"
-                                 style="background-color: ${course.color}20; border-left-color: ${course.color}"
+                                 style="background-color: ${courseColor}20;
+                                        border-left-color: ${courseColor};
+                                        border-top: 3px ${borderStyle} ${fundedColor};
+                                        border-right: 3px ${borderStyle} ${fundedColor};"
                                  onclick="planner.openCourseModal('${course.id}')">
                                 ${hasIssue ? '<span class="conflict-indicator">!</span>' : ''}
                                 <span class="course-name">${course.name}</span>
@@ -1461,11 +1840,13 @@ class CoursePlanner {
     }
 
     getTutorName(tutorId) {
+        if (tutorId === 'none') return 'No tutor';
         const tutor = this.tutors.find(t => t.id === tutorId);
         return tutor ? tutor.name : 'Unknown';
     }
 
     getLocationName(locationId) {
+        if (locationId === 'none') return 'No location';
         const location = this.locations.find(l => l.id === locationId);
         return location ? location.name : 'Unknown';
     }
@@ -1480,8 +1861,10 @@ class CoursePlanner {
 
             // Check if courses overlap
             if (this.coursesOverlap(newCourse, existingCourse)) {
-                // Check for tutor conflict
-                if (newCourse.tutorId === existingCourse.tutorId) {
+                // Check for tutor conflict (skip if either course has no tutor)
+                if (newCourse.tutorId && newCourse.tutorId !== 'none' &&
+                    existingCourse.tutorId && existingCourse.tutorId !== 'none' &&
+                    newCourse.tutorId === existingCourse.tutorId) {
                     const tutorName = this.getTutorName(newCourse.tutorId);
                     conflicts.push({
                         message: `Tutor "${tutorName}" is already teaching "${existingCourse.name}" at this time`,
@@ -1489,8 +1872,10 @@ class CoursePlanner {
                     });
                 }
 
-                // Check for location conflict
-                if (newCourse.locationId === existingCourse.locationId) {
+                // Check for location conflict (skip if either course has no location)
+                if (newCourse.locationId && newCourse.locationId !== 'none' &&
+                    existingCourse.locationId && existingCourse.locationId !== 'none' &&
+                    newCourse.locationId === existingCourse.locationId) {
                     const locationName = this.getLocationName(newCourse.locationId);
                     conflicts.push({
                         message: `Location "${locationName}" is already being used for "${existingCourse.name}" at this time`,
@@ -1639,6 +2024,9 @@ class CoursePlanner {
             case 'tutor-schedule':
                 this.generateTutorScheduleReport(container);
                 break;
+            case 'tutor-workload':
+                this.generateTutorWorkloadReport(container);
+                break;
             case 'location-utilization':
                 this.generateLocationUtilizationReport(container);
                 break;
@@ -1698,6 +2086,103 @@ class CoursePlanner {
                             </tbody>
                         </table>
                     `}
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+    }
+
+    generateTutorWorkloadReport(container) {
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+        // Calculate hours for each tutor per week
+        const tutorWorkload = [];
+
+        this.tutors.forEach(tutor => {
+            const weeklyHours = new Array(40).fill(0); // 40 weeks
+
+            // Get all courses for this tutor
+            const tutorCourses = this.courses.filter(c => c.tutorId === tutor.id);
+
+            tutorCourses.forEach(course => {
+                // Calculate hours per session
+                const startParts = course.startTime.split(':');
+                const endParts = course.endTime.split(':');
+                const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
+                const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
+                const hoursPerSession = (endMinutes - startMinutes) / 60;
+
+                // Get number of days per week for this course
+                const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                const sessionsPerWeek = courseDays.length;
+
+                // Calculate total hours per week for this course
+                const hoursPerWeek = hoursPerSession * sessionsPerWeek;
+
+                // Add to each week the course runs
+                for (let week = course.startWeek - 1; week < course.startWeek - 1 + course.duration; week++) {
+                    if (week >= 0 && week < 40) {
+                        weeklyHours[week] += hoursPerWeek;
+                    }
+                }
+            });
+
+            // Calculate statistics
+            const totalHours = weeklyHours.reduce((sum, hours) => sum + hours, 0);
+            const weeksWorked = weeklyHours.filter(hours => hours > 0).length;
+            const averageHours = weeksWorked > 0 ? totalHours / weeksWorked : 0;
+            const maxHours = Math.max(...weeklyHours);
+
+            tutorWorkload.push({
+                tutor,
+                weeklyHours,
+                totalHours,
+                weeksWorked,
+                averageHours,
+                maxHours
+            });
+        });
+
+        // Sort by total hours descending
+        tutorWorkload.sort((a, b) => b.totalHours - a.totalHours);
+
+        let html = '<h3>Tutor Workload - Hours per Week</h3>';
+
+        tutorWorkload.forEach(data => {
+            html += `
+                <div style="margin-bottom: 2rem; padding: 1rem; background: var(--gray-100); border-radius: 8px;">
+                    <h4>${data.tutor.name}</h4>
+                    <div style="margin-bottom: 1rem;">
+                        <p><strong>Total Hours:</strong> ${data.totalHours.toFixed(1)} hours</p>
+                        <p><strong>Weeks Worked:</strong> ${data.weeksWorked} / 40</p>
+                        <p><strong>Average Hours/Week:</strong> ${data.averageHours.toFixed(1)} hours (when working)</p>
+                        <p><strong>Peak Hours/Week:</strong> ${data.maxHours.toFixed(1)} hours</p>
+                    </div>
+                    <table class="report-table">
+                        <thead>
+                            <tr>
+                                <th>Week</th>
+                                <th>Hours</th>
+                                <th>Visual</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.weeklyHours.map((hours, index) => {
+                                if (hours === 0) return ''; // Skip weeks with no hours
+                                const week = index + 1;
+                                const barWidth = data.maxHours > 0 ? (hours / data.maxHours * 100) : 0;
+                                return `
+                                <tr>
+                                    <td>Week ${week}</td>
+                                    <td>${hours.toFixed(1)} hrs</td>
+                                    <td style="min-width: 200px;">
+                                        <div style="background: #4CAF50; width: ${barWidth}%; height: 20px; border-radius: 4px; min-width: 20px; display: inline-block;"></div>
+                                    </td>
+                                </tr>
+                            `;}).filter(row => row !== '').join('')}
+                        </tbody>
+                    </table>
                 </div>
             `;
         });
@@ -1943,12 +2428,230 @@ class CoursePlanner {
         this.downloadFile('course-planner-data.json', JSON.stringify(data, null, 2), 'application/json');
     }
 
+    exportForAI() {
+        // Analyze all conflicts and issues
+        const conflicts = this.detectAllConflicts();
+        const unavailableResources = this.detectUnavailableResources();
+        const qualificationIssues = this.detectQualificationIssues();
+
+        // Build enhanced data structure
+        const aiData = {
+            tutors: this.tutors,
+            locations: this.locations,
+            courses: this.courses,
+            week1StartDate: this.week1StartDate,
+            metadata: {
+                totalWeeks: 40,
+                timeSlots: "09:00-17:00 (courses can span multiple hours)",
+                daysOfWeek: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+                exportDate: new Date().toISOString()
+            },
+            issues: {
+                conflicts: conflicts,
+                unavailableResources: unavailableResources,
+                qualificationIssues: qualificationIssues,
+                summary: {
+                    totalConflicts: conflicts.length,
+                    totalUnavailableResources: unavailableResources.length,
+                    totalQualificationIssues: qualificationIssues.length
+                }
+            }
+        };
+
+        // Generate AI prompt
+        const prompt = this.generateAIPrompt(aiData);
+
+        // Copy to clipboard
+        const fullText = prompt + "\n\n```json\n" + JSON.stringify(aiData, null, 2) + "\n```";
+
+        navigator.clipboard.writeText(fullText).then(() => {
+            alert('✅ AI optimization request copied to clipboard!\n\nNext steps:\n1. Open Claude or ChatGPT\n2. Paste the copied text (Ctrl+V)\n3. The AI will analyze and fix all issues\n4. Copy the AI\'s entire response\n5. Click "📋 Paste JSON from AI" to import it back\n\nNo need to create a file - just paste directly!');
+            this.closeModal('modal-export');
+        }).catch(err => {
+            alert('Could not copy to clipboard. Please try again or use the JSON export instead.');
+            console.error('Clipboard error:', err);
+        });
+    }
+
+    detectUnavailableResources() {
+        const issues = [];
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+        this.courses.forEach(course => {
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
+            const courseIssues = [];
+
+            // Check tutor availability on all days
+            if (course.tutorId && course.tutorId !== 'none') {
+                const tutorUnavailableDays = [];
+                courseDays.forEach(day => {
+                    if (!this.checkTutorAvailability(course.tutorId, day, course.startTime, course.endTime)) {
+                        tutorUnavailableDays.push(days[day]);
+                    }
+                });
+                if (tutorUnavailableDays.length > 0) {
+                    courseIssues.push(`Tutor "${this.getTutorName(course.tutorId)}" not available on ${tutorUnavailableDays.join(', ')}`);
+                }
+            }
+
+            // Check location availability on all days
+            if (course.locationId && course.locationId !== 'none') {
+                const locationUnavailableDays = [];
+                courseDays.forEach(day => {
+                    if (!this.checkLocationAvailability(course.locationId, day, course.startTime, course.endTime)) {
+                        locationUnavailableDays.push(days[day]);
+                    }
+                });
+                if (locationUnavailableDays.length > 0) {
+                    courseIssues.push(`Location "${this.getLocationName(course.locationId)}" not available on ${locationUnavailableDays.join(', ')}`);
+                }
+            }
+
+            if (courseIssues.length > 0) {
+                issues.push({
+                    courseId: course.id,
+                    courseName: course.name,
+                    issues: courseIssues
+                });
+            }
+        });
+
+        return issues;
+    }
+
+    detectQualificationIssues() {
+        const issues = [];
+
+        this.courses.forEach(course => {
+            if (course.tutorId && course.tutorId !== 'none') {
+                const qualifiedTutors = course.qualifiedTutors || [];
+
+                // Check if assigned tutor is qualified
+                if (qualifiedTutors.length > 0 && !qualifiedTutors.includes(course.tutorId)) {
+                    issues.push({
+                        courseId: course.id,
+                        courseName: course.name,
+                        issue: `Tutor "${this.getTutorName(course.tutorId)}" is NOT qualified to teach this course`,
+                        qualifiedTutorIds: qualifiedTutors
+                    });
+                }
+            }
+        });
+
+        return issues;
+    }
+
+    generateAIPrompt(data) {
+        const { issues } = data;
+
+        return `I have a course scheduling system for an adult learning center with ${data.courses.length} courses, ${data.tutors.length} tutors, and ${data.locations.length} locations.
+
+I need you to analyze the JSON data below and automatically fix ALL scheduling issues while respecting all constraints.
+
+## Current Issues:
+- **${issues.summary.totalConflicts} conflicts** (tutor/location double-bookings)
+- **${issues.summary.totalUnavailableResources} availability issues** (resources not available at scheduled times)
+- **${issues.summary.totalQualificationIssues} qualification issues** (tutors assigned to courses they're not qualified to teach)
+
+## Data Structure:
+
+**Tutors:**
+- \`id\`: unique identifier
+- \`name\`, \`email\`, \`phone\`, \`skills\`: contact info
+- \`canTeach\`: array of course IDs this tutor is qualified to teach
+- \`recurringAvailability\`: object mapping day numbers (0=Sun, 1=Mon, etc.) to time periods ["morning", "afternoon", "evening"]
+  - morning: 09:00-12:00, afternoon: 12:00-17:00, evening: 17:00-21:00
+- \`customAvailability\`: array of specific date/time exceptions
+
+**Locations:**
+- \`id\`: unique identifier
+- \`name\`, \`capacity\`, \`facilities\`: location info
+- \`recurringAvailability\`: same format as tutors
+
+**Courses:**
+- \`id\`: unique identifier
+- \`name\`, \`color\`, \`funded\`, \`notes\`: course info
+- \`tutorId\`: assigned tutor (can be "none" if not yet assigned)
+- \`locationId\`: assigned location (can be "none" if not yet assigned)
+- \`qualifiedTutors\`: array of tutor IDs who CAN teach this course
+- \`daysOfWeek\`: array of day numbers when course runs (0=Sun, 1=Mon, etc.)
+- \`startTime\`, \`endTime\`: time in HH:MM format (24-hour)
+- \`startWeek\`: which week course starts (1-40)
+- \`duration\`: how many weeks course runs
+
+## Requirements:
+
+1. **Fix all conflicts**: No tutor or location can be double-booked
+2. **Respect availability**: Only assign tutors/locations when they're marked as available
+3. **Respect qualifications**: Only assign tutors from the course's \`qualifiedTutors\` list
+4. **Preserve when possible**:
+   - Keep course times and days the same if possible
+   - Only change tutor/location assignments when necessary
+   - If changing times, stay within resource availability
+
+## Your Task:
+
+1. Analyze all the issues listed above
+2. Make minimal changes to fix all conflicts
+3. Ensure all tutors and locations are available when scheduled
+4. Ensure all assigned tutors are qualified (\`tutorId\` must be in \`qualifiedTutors\` array)
+5. Return the COMPLETE corrected JSON with all tutors, locations, and courses
+
+## Output Format:
+
+Return ONLY the corrected JSON in a code block, with no additional explanation. Make sure to include ALL fields, not just the ones you changed.
+
+Here is the data to optimize:`;
+    }
+
+    openPasteJsonModal() {
+        document.getElementById('paste-json-input').value = '';
+        this.closeModal('modal-export');
+        this.openModal('modal-paste-json');
+    }
+
+    processPastedJSON() {
+        const pastedText = document.getElementById('paste-json-input').value.trim();
+
+        if (!pastedText) {
+            alert('Please paste some JSON data first.');
+            return;
+        }
+
+        try {
+            // Try to extract JSON from code blocks if present
+            let jsonText = pastedText;
+
+            // Check if text contains markdown code block
+            const codeBlockMatch = pastedText.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (codeBlockMatch) {
+                jsonText = codeBlockMatch[1].trim();
+            }
+
+            // Parse the JSON
+            const data = JSON.parse(jsonText);
+
+            // Validate the imported data
+            if (!data.tutors || !data.locations || !data.courses) {
+                alert('Invalid data format. The JSON must contain tutors, locations, and courses.');
+                return;
+            }
+
+            // Close paste modal and show preview
+            this.closeModal('modal-paste-json');
+            this.showImportPreview(data);
+
+        } catch (error) {
+            alert('Error parsing JSON: ' + error.message + '\n\nMake sure you pasted valid JSON data.');
+            console.error('Parse error:', error);
+        }
+    }
+
     importFromJSON() {
         const input = document.getElementById('input-import-json');
         const file = input.files[0];
 
         if (!file) {
-            alert('Please select a file to import');
             return;
         }
 
@@ -1957,22 +2660,167 @@ class CoursePlanner {
             try {
                 const data = JSON.parse(e.target.result);
 
-                if (confirm('This will replace all current data. Are you sure?')) {
-                    this.tutors = data.tutors || [];
-                    this.locations = data.locations || [];
-                    this.courses = data.courses || [];
-                    this.saveData();
-
-                    alert('Data imported successfully!');
-                    this.closeModal('modal-export');
-                    this.switchView('dashboard');
+                // Validate the imported data
+                if (!data.tutors || !data.locations || !data.courses) {
+                    alert('Invalid data format. The JSON must contain tutors, locations, and courses.');
+                    return;
                 }
+
+                // Show preview/comparison
+                this.showImportPreview(data);
+
             } catch (error) {
                 alert('Error importing file: ' + error.message);
             }
         };
 
         reader.readAsText(file);
+
+        // Reset the input so the same file can be selected again
+        input.value = '';
+    }
+
+    showImportPreview(newData) {
+        // Calculate differences
+        const diff = this.calculateImportDiff(newData);
+
+        // Show confirmation with summary
+        const message = `Import Summary:
+
+Tutors: ${this.tutors.length} → ${newData.tutors.length} (${diff.tutors.added} added, ${diff.tutors.removed} removed, ${diff.tutors.modified} modified)
+Locations: ${this.locations.length} → ${newData.locations.length} (${diff.locations.added} added, ${diff.locations.removed} removed, ${diff.locations.modified} modified)
+Courses: ${this.courses.length} → ${newData.courses.length} (${diff.courses.added} added, ${diff.courses.removed} removed, ${diff.courses.modified} modified)
+
+This will replace all current data. Are you sure?`;
+
+        if (confirm(message)) {
+            // Create backup before importing
+            this.createBackup();
+
+            // Apply the import
+            this.tutors = newData.tutors || [];
+            this.locations = newData.locations || [];
+            this.courses = newData.courses || [];
+            if (newData.week1StartDate) {
+                this.week1StartDate = newData.week1StartDate;
+                document.getElementById('week1-start-date').value = newData.week1StartDate;
+            }
+
+            this.saveData();
+
+            alert('✅ Data imported successfully!\n\nA backup of your previous data has been saved.\nUse "Undo Last Import" if you need to restore it.');
+            this.closeModal('modal-export');
+            this.switchView('dashboard');
+        }
+    }
+
+    calculateImportDiff(newData) {
+        const diff = {
+            tutors: { added: 0, removed: 0, modified: 0 },
+            locations: { added: 0, removed: 0, modified: 0 },
+            courses: { added: 0, removed: 0, modified: 0 }
+        };
+
+        // Calculate tutor changes
+        const currentTutorIds = new Set(this.tutors.map(t => t.id));
+        const newTutorIds = new Set(newData.tutors.map(t => t.id));
+
+        newData.tutors.forEach(newTutor => {
+            if (!currentTutorIds.has(newTutor.id)) {
+                diff.tutors.added++;
+            } else {
+                const currentTutor = this.tutors.find(t => t.id === newTutor.id);
+                if (JSON.stringify(currentTutor) !== JSON.stringify(newTutor)) {
+                    diff.tutors.modified++;
+                }
+            }
+        });
+        this.tutors.forEach(tutor => {
+            if (!newTutorIds.has(tutor.id)) {
+                diff.tutors.removed++;
+            }
+        });
+
+        // Calculate location changes
+        const currentLocationIds = new Set(this.locations.map(l => l.id));
+        const newLocationIds = new Set(newData.locations.map(l => l.id));
+
+        newData.locations.forEach(newLocation => {
+            if (!currentLocationIds.has(newLocation.id)) {
+                diff.locations.added++;
+            } else {
+                const currentLocation = this.locations.find(l => l.id === newLocation.id);
+                if (JSON.stringify(currentLocation) !== JSON.stringify(newLocation)) {
+                    diff.locations.modified++;
+                }
+            }
+        });
+        this.locations.forEach(location => {
+            if (!newLocationIds.has(location.id)) {
+                diff.locations.removed++;
+            }
+        });
+
+        // Calculate course changes
+        const currentCourseIds = new Set(this.courses.map(c => c.id));
+        const newCourseIds = new Set(newData.courses.map(c => c.id));
+
+        newData.courses.forEach(newCourse => {
+            if (!currentCourseIds.has(newCourse.id)) {
+                diff.courses.added++;
+            } else {
+                const currentCourse = this.courses.find(c => c.id === newCourse.id);
+                if (JSON.stringify(currentCourse) !== JSON.stringify(newCourse)) {
+                    diff.courses.modified++;
+                }
+            }
+        });
+        this.courses.forEach(course => {
+            if (!newCourseIds.has(course.id)) {
+                diff.courses.removed++;
+            }
+        });
+
+        return diff;
+    }
+
+    createBackup() {
+        const backup = {
+            tutors: JSON.parse(JSON.stringify(this.tutors)),
+            locations: JSON.parse(JSON.stringify(this.locations)),
+            courses: JSON.parse(JSON.stringify(this.courses)),
+            week1StartDate: this.week1StartDate,
+            backupDate: new Date().toISOString()
+        };
+
+        localStorage.setItem('coursePlannerBackup', JSON.stringify(backup));
+        console.log('Backup created:', backup.backupDate);
+    }
+
+    restoreBackup() {
+        const backupData = localStorage.getItem('coursePlannerBackup');
+
+        if (!backupData) {
+            alert('No backup found. Import a file first to create a backup.');
+            return;
+        }
+
+        const backup = JSON.parse(backupData);
+
+        if (confirm(`Restore backup from ${new Date(backup.backupDate).toLocaleString()}?\n\nThis will undo your last import.`)) {
+            this.tutors = backup.tutors;
+            this.locations = backup.locations;
+            this.courses = backup.courses;
+            this.week1StartDate = backup.week1StartDate;
+            if (this.week1StartDate) {
+                document.getElementById('week1-start-date').value = this.week1StartDate;
+            }
+
+            this.saveData();
+
+            alert('✅ Backup restored successfully!');
+            this.switchView('dashboard');
+        }
     }
 
     downloadFile(filename, content, type) {
