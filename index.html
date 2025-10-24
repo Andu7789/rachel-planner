@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Adult Learning Course Planner</title>
+    <title>ALPACA</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -53,19 +53,19 @@
                     <div class="dashboard-card">
                         <h2>Quick Stats</h2>
                         <div class="stats-grid">
-                            <div class="stat-item">
+                            <div class="stat-item" onclick="planner.switchView('courses')" style="cursor: pointer;">
                                 <span class="stat-value" id="stat-courses">0</span>
                                 <span class="stat-label">Courses Scheduled</span>
                             </div>
-                            <div class="stat-item">
+                            <div class="stat-item" onclick="planner.switchView('tutors')" style="cursor: pointer;">
                                 <span class="stat-value" id="stat-tutors">0</span>
                                 <span class="stat-label">Active Tutors</span>
                             </div>
-                            <div class="stat-item">
+                            <div class="stat-item" onclick="planner.switchView('locations')" style="cursor: pointer;">
                                 <span class="stat-value" id="stat-locations">0</span>
                                 <span class="stat-label">Locations</span>
                             </div>
-                            <div class="stat-item">
+                            <div class="stat-item" onclick="planner.switchView('reports'); document.getElementById('report-type-select').value='conflicts'; planner.generateReport()" style="cursor: pointer;">
                                 <span class="stat-value" id="stat-conflicts">0</span>
                                 <span class="stat-label">Conflicts</span>
                             </div>
@@ -111,24 +111,22 @@
             <section id="view-courses" class="view">
                 <div class="view-header view-header-sticky">
                     <h2>Course Schedule</h2>
-                    <div class="calendar-controls" style="flex-wrap: wrap; gap: 0.5rem;">
-                        <input type="search" id="course-search" class="input" placeholder="🔍 Search courses..." style="max-width: 200px;">
-                        <select id="course-selector" class="select" style="min-width: 150px;">
+                    <div class="calendar-controls" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: nowrap;">
+                        <input type="search" id="course-search" class="input" placeholder="🔍 Search..." style="width: 150px; flex-shrink: 0;">
+                        <select id="course-selector" class="select" style="width: 200px; flex-shrink: 1; min-width: 150px;">
                             <option value="">Select a course...</option>
                         </select>
-                        <button id="btn-add-course" class="btn btn-primary">Add Course</button>
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <button id="btn-today" class="btn btn-secondary">Today</button>
-                            <button id="btn-jump-to-week" class="btn btn-secondary">Jump to Week</button>
-                            <button id="btn-prev-weeks" class="btn btn-icon">←</button>
-                            <span id="week-range-display">Weeks 1-4</span>
-                            <button id="btn-next-weeks" class="btn btn-icon">→</button>
-                            <select id="view-mode-select" class="select">
-                                <option value="week">Week View</option>
-                                <option value="4weeks" selected>4 Weeks</option>
-                                <option value="month">Month View</option>
-                            </select>
-                        </div>
+                        <button id="btn-add-course" class="btn btn-primary" style="flex-shrink: 0;">Add Course</button>
+                        <button id="btn-today" class="btn btn-secondary" style="flex-shrink: 0;">Today</button>
+                        <button id="btn-jump-to-week" class="btn btn-secondary" style="flex-shrink: 0;">Jump to Week</button>
+                        <button id="btn-prev-weeks" class="btn btn-icon" style="flex-shrink: 0;">←</button>
+                        <span id="week-range-display" style="min-width: 80px; text-align: center; flex-shrink: 0;">Weeks 1-4</span>
+                        <button id="btn-next-weeks" class="btn btn-icon" style="flex-shrink: 0;">→</button>
+                        <select id="view-mode-select" class="select" style="width: 110px; flex-shrink: 0;">
+                            <option value="week">Week</option>
+                            <option value="4weeks" selected>4 Weeks</option>
+                            <option value="month">Month</option>
+                        </select>
                     </div>
                 </div>
                 <div class="calendar-container">
@@ -345,6 +343,14 @@
                         <label for="course-notes">Notes</label>
                         <textarea id="course-notes" class="input" rows="3"></textarea>
                     </div>
+                    <div class="form-group">
+                        <label for="course-students">Expected Number of Students</label>
+                        <input type="number" id="course-students" class="input" min="1" placeholder="e.g., 12">
+                        <p style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.5rem;">
+                            Used to check if location has sufficient capacity
+                        </p>
+                    </div>
+                    <div id="capacity-warning" class="availability-warning" style="display: none;"></div>
                     <div class="form-group">
                         <label>Qualified Tutors (select tutors who can teach this course)</label>
                         <div id="course-qualified-tutors" style="max-height: 150px; overflow-y: auto; border: 1px solid var(--gray-300); border-radius: 4px; padding: 0.5rem;"></div>
