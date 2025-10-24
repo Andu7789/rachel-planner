@@ -591,6 +591,7 @@ class CoursePlanner {
             }
         } else {
             document.getElementById('tutor-modal-title').textContent = 'Add Tutor';
+            document.getElementById('tutor-id').value = ''; // Explicitly clear ID for new tutor
             this.renderCustomAvailability('tutor', []);
             this.populateTutorCanTeach([]);
         }
@@ -921,6 +922,7 @@ class CoursePlanner {
             }
         } else {
             document.getElementById('location-modal-title').textContent = 'Add Location';
+            document.getElementById('location-id').value = ''; // Explicitly clear ID for new location
             this.renderCustomAvailability('location', []);
         }
 
