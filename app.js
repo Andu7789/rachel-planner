@@ -277,11 +277,14 @@ class CoursePlanner {
         document.getElementById('btn-duplicate-course').addEventListener('click', () => this.duplicateCourse());
 
         // Course form availability checking
-        const courseFormInputs = ['course-tutor', 'course-location', 'course-day', 'course-start-time', 'course-end-time', 'course-start-week', 'course-duration'];
+        const courseFormInputs = ['course-tutor', 'course-location', 'course-day', 'course-start-time', 'course-end-time', 'course-start-week', 'course-duration', 'course-students'];
         courseFormInputs.forEach(inputId => {
             const element = document.getElementById(inputId);
             if (element) {
-                element.addEventListener('change', () => this.checkCourseFormAvailability());
+                element.addEventListener('change', () => {
+                    this.updateResourceDropdowns();
+                    this.checkCourseFormAvailability();
+                });
             }
         });
 
@@ -315,6 +318,8 @@ class CoursePlanner {
 
         // Reports
         document.getElementById('btn-generate-report').addEventListener('click', () => this.generateReport());
+        document.getElementById('report-type-select').addEventListener('change', () => this.generateReport());
+
 
         // Export/Import
         document.getElementById('btn-export-pdf').addEventListener('click', () => this.exportToPDF());
@@ -625,9 +630,10 @@ class CoursePlanner {
             <label style="display: flex; align-items: center; padding: 0.3rem; cursor: pointer;"
                    onmouseover="this.style.background='var(--gray-100)'"
                    onmouseout="this.style.background='transparent'">
-                <input type="checkbox" name="course-tutor-qualified" value="${tutor.id}"
+                <input type="checkbox" name="qualified-tutor" value="${tutor.id}"
                        ${qualifiedTutorIds.includes(tutor.id) ? 'checked' : ''}
-                       style="margin-right: 0.5rem;">
+                       style="margin-right: 0.5rem;"
+                       onchange="planner.updateResourceDropdowns()">
                 <span>${tutor.name}</span>
             </label>
         `).join('');
@@ -1020,18 +1026,6 @@ class CoursePlanner {
         document.getElementById('location-availability-warning').style.display = 'none';
         document.getElementById('course-conflicts-warning').style.display = 'none';
 
-        // Populate tutor dropdown
-        const tutorSelect = document.getElementById('course-tutor');
-        tutorSelect.innerHTML = '<option value="">Select Tutor</option>' +
-            '<option value="none">No Tutor Yet</option>' +
-            this.tutors.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
-
-        // Populate location dropdown
-        const locationSelect = document.getElementById('course-location');
-        locationSelect.innerHTML = '<option value="">Select Location</option>' +
-            '<option value="none">No Location Yet</option>' +
-            this.locations.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
-
         if (courseId) {
             const course = this.courses.find(c => c.id === courseId);
             if (course) {
@@ -1041,8 +1035,6 @@ class CoursePlanner {
                 document.getElementById('course-color').value = course.color;
                 this.updateColorPreview(course.color);
                 document.getElementById('course-funded').checked = course.funded || false;
-                document.getElementById('course-tutor').value = course.tutorId;
-                document.getElementById('course-location').value = course.locationId;
                 document.getElementById('course-start-week').value = course.startWeek;
                 document.getElementById('course-duration').value = course.duration;
 
@@ -1055,9 +1047,18 @@ class CoursePlanner {
                 document.getElementById('course-start-time').value = course.startTime;
                 document.getElementById('course-end-time').value = course.endTime;
                 document.getElementById('course-notes').value = course.notes || '';
+                document.getElementById('course-students').value = course.studentCount || '';
 
-                // Populate qualified tutors checkboxes
+                // Populate qualified tutors checkboxes FIRST
                 this.populateCourseQualifiedTutors(course.qualifiedTutors || []);
+
+                // NOW populate dropdowns with color coding (after qualified tutors are set)
+                this.populateTutorDropdown();
+                this.populateLocationDropdown();
+
+                // Set tutor and location values
+                document.getElementById('course-tutor').value = course.tutorId;
+                document.getElementById('course-location').value = course.locationId;
 
                 // Show delete and duplicate buttons for existing courses
                 document.getElementById('btn-delete-course').style.display = 'block';
@@ -1081,6 +1082,10 @@ class CoursePlanner {
             // Populate qualified tutors checkboxes (empty for new course)
             this.populateCourseQualifiedTutors([]);
 
+            // Populate dropdowns with color coding
+            this.populateTutorDropdown();
+            this.populateLocationDropdown();
+
             // Hide delete and duplicate buttons for new courses
             document.getElementById('btn-delete-course').style.display = 'none';
             document.getElementById('btn-duplicate-course').style.display = 'none';
@@ -1100,6 +1105,225 @@ class CoursePlanner {
         preview.style.borderColor = color;
         preview.style.color = color;
         preview.textContent = color.toUpperCase();
+    }
+
+    updateResourceDropdowns() {
+        this.populateTutorDropdown();
+        this.populateLocationDropdown();
+    }
+
+    populateTutorDropdown() {
+        const tutorSelect = document.getElementById('course-tutor');
+        const currentTutorId = tutorSelect.value; // Preserve selection
+
+        // Get current form values
+        const courseId = document.getElementById('course-id').value;
+        const dayCheckboxes = document.querySelectorAll('input[name="course-day"]:checked');
+        const daysOfWeek = Array.from(dayCheckboxes).map(cb => parseInt(cb.value));
+        const startTime = document.getElementById('course-start-time').value;
+        const endTime = document.getElementById('course-end-time').value;
+        const startWeek = parseInt(document.getElementById('course-start-week').value) || 1;
+        const duration = parseInt(document.getElementById('course-duration').value) || 1;
+
+        // Get qualified tutor IDs from checkboxes
+        const qualifiedTutorIds = [];
+        document.querySelectorAll('input[name="qualified-tutor"]:checked').forEach(cb => {
+            qualifiedTutorIds.push(cb.value);
+        });
+
+        // If this is an existing course being edited, also get qualified tutors from the course data
+        // This handles the case when the modal first opens before user interacts with checkboxes
+        let courseQualifiedTutors = [];
+        if (courseId) {
+            const course = this.courses.find(c => c.id === courseId);
+            if (course && course.qualifiedTutors) {
+                courseQualifiedTutors = course.qualifiedTutors;
+            }
+        }
+
+        // Use checkboxes if any are checked, otherwise use course data
+        const effectiveQualifiedTutors = qualifiedTutorIds.length > 0 ? qualifiedTutorIds : courseQualifiedTutors;
+
+        let html = '<option value="">Select Tutor</option>';
+        html += '<option value="none">No Tutor Yet</option>';
+
+        // Check each tutor
+        this.tutors.forEach(tutor => {
+            let status = [];
+            let statusEmoji = '🟢'; // Default green
+
+            // Check qualification
+            const isQualified = effectiveQualifiedTutors.length === 0 || effectiveQualifiedTutors.includes(tutor.id);
+            if (!isQualified) {
+                status.push('Not Qualified');
+                statusEmoji = '🔴';
+            } else {
+                status.push('Qualified');
+            }
+
+            // Check availability
+            if (daysOfWeek.length > 0 && startTime && endTime) {
+                let allDaysAvailable = true;
+                daysOfWeek.forEach(day => {
+                    if (!this.checkTutorAvailability(tutor.id, day, startTime, endTime)) {
+                        allDaysAvailable = false;
+                    }
+                });
+
+                if (!allDaysAvailable) {
+                    status.push('Not Available');
+                    statusEmoji = '🔴';
+                } else {
+                    status.push('Available');
+                }
+
+                // Check conflicts
+                const hasConflict = this.checkTutorConflict(tutor.id, courseId, daysOfWeek, startTime, endTime, startWeek, duration);
+                if (hasConflict) {
+                    status.push('Conflict');
+                    statusEmoji = '🔴';
+                }
+            }
+
+            // Change emoji based on status
+            if (statusEmoji === '🔴') {
+                // Already red
+            } else if (status.includes('Not Available') || status.includes('Conflict')) {
+                statusEmoji = '🟡';
+            }
+
+            const statusText = status.join(', ');
+            html += `<option value="${tutor.id}">${statusEmoji} ${tutor.name} (${statusText})</option>`;
+        });
+
+        tutorSelect.innerHTML = html;
+        tutorSelect.value = currentTutorId; // Restore selection
+    }
+
+    populateLocationDropdown() {
+        const locationSelect = document.getElementById('course-location');
+        const currentLocationId = locationSelect.value; // Preserve selection
+
+        // Get current form values
+        const courseId = document.getElementById('course-id').value;
+        const dayCheckboxes = document.querySelectorAll('input[name="course-day"]:checked');
+        const daysOfWeek = Array.from(dayCheckboxes).map(cb => parseInt(cb.value));
+        const startTime = document.getElementById('course-start-time').value;
+        const endTime = document.getElementById('course-end-time').value;
+        const startWeek = parseInt(document.getElementById('course-start-week').value) || 1;
+        const duration = parseInt(document.getElementById('course-duration').value) || 1;
+        const studentCount = parseInt(document.getElementById('course-students').value) || 0;
+
+        let html = '<option value="">Select Location</option>';
+        html += '<option value="none">No Location Yet</option>';
+
+        // Check each location
+        this.locations.forEach(location => {
+            let status = [];
+            let statusEmoji = '🟢'; // Default green
+
+            // Check capacity first (if student count is provided)
+            if (studentCount > 0 && location.capacity) {
+                if (studentCount > location.capacity) {
+                    status.push(`Capacity: ${location.capacity} (need ${studentCount})`);
+                    statusEmoji = '🔴';
+                } else {
+                    status.push(`Capacity: ${location.capacity}`);
+                }
+            } else if (location.capacity) {
+                status.push(`Capacity: ${location.capacity}`);
+            }
+
+            // Check availability
+            if (daysOfWeek.length > 0 && startTime && endTime) {
+                let allDaysAvailable = true;
+                daysOfWeek.forEach(day => {
+                    if (!this.checkLocationAvailability(location.id, day, startTime, endTime)) {
+                        allDaysAvailable = false;
+                    }
+                });
+
+                if (!allDaysAvailable) {
+                    status.push('Not Available');
+                    statusEmoji = '🔴';
+                } else {
+                    status.push('Available');
+                }
+
+                // Check conflicts
+                const hasConflict = this.checkLocationConflict(location.id, courseId, daysOfWeek, startTime, endTime, startWeek, duration);
+                if (hasConflict) {
+                    status.push('Conflict');
+                    statusEmoji = '🔴';
+                }
+            } else {
+                status.push('Available');
+            }
+
+            // Change emoji based on status
+            if (statusEmoji === '🔴') {
+                // Already red
+            } else if (status.includes('Not Available') || status.includes('Conflict')) {
+                statusEmoji = '🟡';
+            }
+
+            const statusText = status.join(', ');
+            html += `<option value="${location.id}">${statusEmoji} ${location.name} (${statusText})</option>`;
+        });
+
+        locationSelect.innerHTML = html;
+        locationSelect.value = currentLocationId; // Restore selection
+    }
+
+    timesOverlap(start1, end1, start2, end2) {
+        const start1Minutes = this.timeToMinutes(start1);
+        const end1Minutes = this.timeToMinutes(end1);
+        const start2Minutes = this.timeToMinutes(start2);
+        const end2Minutes = this.timeToMinutes(end2);
+
+        return !(end1Minutes <= start2Minutes || end2Minutes <= start1Minutes);
+    }
+
+    checkTutorConflict(tutorId, excludeCourseId, daysOfWeek, startTime, endTime, startWeek, duration) {
+        const otherCourses = this.courses.filter(c => c.id !== excludeCourseId && c.tutorId === tutorId);
+
+        for (const course of otherCourses) {
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
+            const hasSharedDay = daysOfWeek.some(day => courseDays.includes(day));
+
+            if (hasSharedDay && this.timesOverlap(startTime, endTime, course.startTime, course.endTime)) {
+                const weekStart = startWeek;
+                const weekEnd = startWeek + duration - 1;
+                const courseWeekStart = course.startWeek;
+                const courseWeekEnd = course.startWeek + course.duration - 1;
+
+                if (!(weekEnd < courseWeekStart || weekStart > courseWeekEnd)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    checkLocationConflict(locationId, excludeCourseId, daysOfWeek, startTime, endTime, startWeek, duration) {
+        const otherCourses = this.courses.filter(c => c.id !== excludeCourseId && c.locationId === locationId);
+
+        for (const course of otherCourses) {
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
+            const hasSharedDay = daysOfWeek.some(day => courseDays.includes(day));
+
+            if (hasSharedDay && this.timesOverlap(startTime, endTime, course.startTime, course.endTime)) {
+                const weekStart = startWeek;
+                const weekEnd = startWeek + duration - 1;
+                const courseWeekStart = course.startWeek;
+                const courseWeekEnd = course.startWeek + course.duration - 1;
+
+                if (!(weekEnd < courseWeekStart || weekStart > courseWeekEnd)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     checkCourseFormAvailability() {
@@ -1337,6 +1561,29 @@ class CoursePlanner {
         } else {
             conflictWarning.style.display = 'none';
         }
+
+        // Check room capacity
+        const capacityWarning = document.getElementById('capacity-warning');
+        const studentCount = parseInt(document.getElementById('course-students').value);
+
+        if (locationId && locationId !== 'none' && studentCount) {
+            const location = this.locations.find(l => l.id === locationId);
+            if (location && location.capacity) {
+                if (studentCount > location.capacity) {
+                    capacityWarning.className = 'availability-warning error';
+                    capacityWarning.textContent = `⚠️ Room capacity exceeded! ${location.name} has capacity for ${location.capacity} students, but ${studentCount} students are expected.`;
+                    capacityWarning.style.display = 'flex';
+                } else {
+                    capacityWarning.className = 'availability-warning success';
+                    capacityWarning.textContent = `✓ Room capacity OK: ${studentCount} students in ${location.name} (capacity: ${location.capacity})`;
+                    capacityWarning.style.display = 'flex';
+                }
+            } else {
+                capacityWarning.style.display = 'none';
+            }
+        } else {
+            capacityWarning.style.display = 'none';
+        }
     }
 
     saveCourse(e) {
@@ -1363,10 +1610,11 @@ class CoursePlanner {
         const startTime = document.getElementById('course-start-time').value;
         const endTime = document.getElementById('course-end-time').value;
         const notes = document.getElementById('course-notes').value;
+        const studentCount = parseInt(document.getElementById('course-students').value) || null;
 
         // Get qualified tutors (selected tutors)
         const qualifiedTutors = [];
-        document.querySelectorAll('input[name="course-tutor-qualified"]:checked').forEach(checkbox => {
+        document.querySelectorAll('input[name="qualified-tutor"]:checked').forEach(checkbox => {
             qualifiedTutors.push(checkbox.value);
         });
 
@@ -1383,6 +1631,7 @@ class CoursePlanner {
             startTime,
             endTime,
             notes,
+            studentCount,
             qualifiedTutors
         };
 
@@ -1706,8 +1955,12 @@ class CoursePlanner {
                                                        qualifiedTutors.length > 0 &&
                                                        !qualifiedTutors.includes(course.tutorId);
 
-                        // Show indicator if there's a conflict, availability issue, OR qualification issue
-                        const hasIssue = courseHasConflict || hasAvailabilityIssue || hasQualificationIssue;
+                        // Check if room capacity is exceeded
+                        const hasCapacityIssue = course.studentCount && location && location.capacity &&
+                                                 course.studentCount > location.capacity;
+
+                        // Show indicator if there's a conflict, availability issue, qualification issue, OR capacity issue
+                        const hasIssue = courseHasConflict || hasAvailabilityIssue || hasQualificationIssue || hasCapacityIssue;
 
                         // Use course custom color for background and left border
                         const courseColor = course.color;
@@ -2341,6 +2594,14 @@ class CoursePlanner {
                 issues.push(`Location "${this.getLocationName(course.locationId)}" not available on ${locationUnavailableDays.join(', ')}`);
             }
 
+            // Check room capacity
+            if (course.studentCount && course.locationId && course.locationId !== 'none') {
+                const location = this.locations.find(l => l.id === course.locationId);
+                if (location && location.capacity && course.studentCount > location.capacity) {
+                    issues.push(`Room capacity exceeded: ${course.studentCount} students in "${location.name}" (capacity: ${location.capacity})`);
+                }
+            }
+
             if (issues.length > 0) {
                 coursesWithIssues.push({
                     course,
@@ -2471,6 +2732,105 @@ class CoursePlanner {
             alert('Could not copy to clipboard. Please try again or use the JSON export instead.');
             console.error('Clipboard error:', err);
         });
+    }
+
+    async autoOptimizeWithAI() {
+        // Check if API key is set
+        if (!this.settings.anthropicApiKey || this.settings.anthropicApiKey.trim() === '') {
+            alert('❌ No API key found!\n\nPlease set your Anthropic API key in Dashboard > Settings first.\n\nGet your API key from: https://console.anthropic.com/');
+            return;
+        }
+
+        // Show loading message
+        const originalButtonText = document.getElementById('btn-auto-optimize-ai').textContent;
+        document.getElementById('btn-auto-optimize-ai').textContent = '⏳ Optimizing with AI...';
+        document.getElementById('btn-auto-optimize-ai').disabled = true;
+
+        try {
+            // Prepare the data (same as exportForAI)
+            const conflicts = this.detectAllConflicts();
+            const unavailableResources = this.detectUnavailableResources();
+            const qualificationIssues = this.detectQualificationIssues();
+
+            const aiData = {
+                tutors: this.tutors,
+                locations: this.locations,
+                courses: this.courses,
+                week1StartDate: this.week1StartDate,
+                metadata: {
+                    totalWeeks: 40,
+                    timeSlots: "09:00-17:00 (courses can span multiple hours)",
+                    daysOfWeek: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+                    exportDate: new Date().toISOString()
+                },
+                issues: {
+                    conflicts: conflicts,
+                    unavailableResources: unavailableResources,
+                    qualificationIssues: qualificationIssues,
+                    summary: {
+                        totalConflicts: conflicts.length,
+                        totalUnavailableResources: unavailableResources.length,
+                        totalQualificationIssues: qualificationIssues.length
+                    }
+                }
+            };
+
+            const prompt = this.generateAIPrompt(aiData);
+
+            // Call Anthropic API
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': this.settings.anthropicApiKey,
+                    'anthropic-version': '2023-06-01'
+                },
+                body: JSON.stringify({
+                    model: 'claude-3-5-sonnet-20241022',
+                    max_tokens: 8000,
+                    messages: [{
+                        role: 'user',
+                        content: prompt + "\n\n```json\n" + JSON.stringify(aiData, null, 2) + "\n```"
+                    }]
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error?.message || `API request failed: ${response.status}`);
+            }
+
+            const result = await response.json();
+            const aiResponse = result.content[0].text;
+
+            // Extract JSON from AI response
+            const jsonMatch = aiResponse.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (!jsonMatch) {
+                throw new Error('Could not find JSON in AI response');
+            }
+
+            const optimizedData = JSON.parse(jsonMatch[1].trim());
+
+            // Show preview and import
+            this.closeModal('modal-export');
+            this.showImportPreview(optimizedData);
+
+            alert('✅ AI optimization complete!\n\nReview the changes in the preview and click "Apply Import" to use the optimized schedule.');
+
+        } catch (error) {
+            console.error('AI optimization error:', error);
+
+            let errorMsg = error.message;
+            if (error.message.includes('Failed to fetch') || error.message.includes('CORS')) {
+                errorMsg = 'Browser security (CORS) prevents direct API calls.\n\nThe Anthropic API cannot be called directly from browsers.\n\nPlease use the "Manual: Export for AI" option instead:\n1. Click "Manual: Export for AI"\n2. Paste into Claude at claude.ai\n3. Copy the response\n4. Click "Paste JSON from AI"';
+            }
+
+            alert(`❌ AI optimization failed:\n\n${errorMsg}\n\nNote: Direct API calls require a backend server.\nThe manual workflow is recommended for browser-based usage.`);
+        } finally {
+            // Restore button
+            document.getElementById('btn-auto-optimize-ai').textContent = originalButtonText;
+            document.getElementById('btn-auto-optimize-ai').disabled = false;
+        }
     }
 
     detectUnavailableResources() {
@@ -2628,6 +2988,18 @@ Here is the data to optimize:`;
                 jsonText = codeBlockMatch[1].trim();
             }
 
+            // Debug: Show what we're trying to parse
+            console.log('Attempting to parse JSON...');
+            console.log('First 200 chars:', jsonText.substring(0, 200));
+            console.log('Last 100 chars:', jsonText.substring(jsonText.length - 100));
+            console.log('Text length:', jsonText.length);
+
+            // Check for common issues
+            if (jsonText.startsWith('```') || jsonText.endsWith('```')) {
+                alert('⚠️ Detected markdown code blocks that weren\'t stripped.\n\nPlease copy ONLY the JSON content (without the ``` markers).');
+                return;
+            }
+
             // Parse the JSON
             const data = JSON.parse(jsonText);
 
@@ -2642,8 +3014,16 @@ Here is the data to optimize:`;
             this.showImportPreview(data);
 
         } catch (error) {
-            alert('Error parsing JSON: ' + error.message + '\n\nMake sure you pasted valid JSON data.');
             console.error('Parse error:', error);
+            console.error('Pasted text:', pastedText);
+
+            let helpText = '\n\nTips:\n';
+            helpText += '- Make sure you copied the ENTIRE JSON (from { to })\n';
+            helpText += '- Remove any extra text before or after the JSON\n';
+            helpText += '- Don\'t include markdown code blocks (```)\n';
+            helpText += '- Check the browser console (F12) for more details';
+
+            alert('Error parsing JSON: ' + error.message + helpText);
         }
     }
 
@@ -2658,7 +3038,12 @@ Here is the data to optimize:`;
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
-                const data = JSON.parse(e.target.result);
+                const jsonText = e.target.result.trim();
+
+                // Show first 100 characters for debugging
+                console.log('First 100 chars of file:', jsonText.substring(0, 100));
+
+                const data = JSON.parse(jsonText);
 
                 // Validate the imported data
                 if (!data.tutors || !data.locations || !data.courses) {
@@ -2670,7 +3055,10 @@ Here is the data to optimize:`;
                 this.showImportPreview(data);
 
             } catch (error) {
-                alert('Error importing file: ' + error.message);
+                const errorMsg = 'Error parsing JSON: ' + error.message + '\n\nMake sure you pasted valid JSON data.';
+                alert(errorMsg);
+                console.error('JSON parse error:', error);
+                console.error('File content length:', e.target.result.length);
             }
         };
 
