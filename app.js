@@ -2388,8 +2388,16 @@ class CoursePlanner {
         // Day headers for each week
         html += '<div class="calendar-header"></div>'; // Empty cell for time column
         for (let week = startWeek; week <= endWeek; week++) {
+            const weekStart = this.getWeekStartDate(week);
             for (let i = 1; i < days.length; i++) {
-                html += `<div class="calendar-header calendar-day-header">${days[i]}</div>`;
+                let dateStr = '';
+                if (weekStart) {
+                    const dayDate = new Date(weekStart);
+                    // weekStart is Monday (day 1), so add (i-1) days for Tue, Wed, Thu, Fri
+                    dayDate.setDate(dayDate.getDate() + (i - 1));
+                    dateStr = ` ${dayDate.getDate()}/${dayDate.getMonth() + 1}`;
+                }
+                html += `<div class="calendar-header calendar-day-header">${days[i]}${dateStr}</div>`;
             }
         }
 
@@ -2554,6 +2562,28 @@ class CoursePlanner {
                         // Show indicator if there's a conflict, availability issue, qualification issue, OR capacity issue
                         const hasIssue = courseHasConflict || hasAvailabilityIssue || hasQualificationIssue || hasCapacityIssue;
 
+                        // Calculate start and end dates
+                        const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                        const weekStart = this.getWeekStartDate(course.startWeek);
+                        let startDateStr = '';
+                        let endDateStr = '';
+                        if (weekStart) {
+                            // Get actual start date (first day the course runs)
+                            const firstDayOfWeek = courseDays[0];
+                            const actualStartDate = new Date(weekStart);
+                            actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+
+                            // Calculate end date
+                            const endWeek = course.startWeek + course.duration - 1;
+                            const endWeekStart = this.getWeekStartDate(endWeek);
+                            const lastDayOfWeek = courseDays[courseDays.length - 1];
+                            const actualEndDate = new Date(endWeekStart);
+                            actualEndDate.setDate(actualEndDate.getDate() + (lastDayOfWeek - 1));
+
+                            startDateStr = this.formatDate(actualStartDate);
+                            endDateStr = this.formatDate(actualEndDate);
+                        }
+
                         // Use course custom color for background and left border
                         const courseColor = course.color;
 
@@ -2565,9 +2595,9 @@ class CoursePlanner {
                         // Use dashed borders for non-funded courses
                         const borderStyle = course.funded ? 'solid' : 'dashed';
 
-                        // Calculate height: each hour slot is 60px min + 1px gap
+                        // Calculate height: each hour slot is 75px min + 1px gap
                         // For multi-hour courses, we need to span across multiple cells visually
-                        const cellHeight = 61; // 60px min-height + 1px gap
+                        const cellHeight = 84; // 75px min-height + 1px gap
                         const totalHeight = (heightMultiplier * cellHeight) - 1; // Total pixels to span
                         const zIndex = heightMultiplier > 1 ? 10 : 'auto'; // Bring spanning courses to front
 
@@ -2576,6 +2606,7 @@ class CoursePlanner {
                         const courseWidthPx = 150; // Fixed width in pixels for each course
                         const gapPx = 8; // Gap between courses
                         const leftPositionPx = columnInfo.column * (courseWidthPx + gapPx);
+                        console.log(course);
 
                         html += `
                             <div class="course-block ${hasIssue ? 'conflict' : ''}"
@@ -2594,6 +2625,7 @@ class CoursePlanner {
                                 <div class="course-details">
                                     ${tutor ? tutor.name : 'No tutor'} | ${location ? location.name : 'No location'}
                                 </div>
+                                ${startDateStr && endDateStr ? `<div class="course-dates">${startDateStr} - ${endDateStr}</div>` : ''}
                             </div>
                         `;
                     });
@@ -2906,7 +2938,12 @@ class CoursePlanner {
     generateTutorScheduleReport(container) {
         const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-        let html = '<h3>Tutor Schedules</h3>';
+        let html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0;">Tutor Schedules</h3>
+                <button id="btn-export-tutor-schedules" class="btn btn-primary" onclick="planner.exportTutorSchedulesToExcel()">📊 Export to Excel</button>
+            </div>
+        `;
 
         this.tutors.forEach(tutor => {
             const tutorCourses = this.courses.filter(c => c.tutorId === tutor.id);
@@ -2921,7 +2958,7 @@ class CoursePlanner {
                                     <th>Course</th>
                                     <th>Day</th>
                                     <th>Time</th>
-                                    <th>Weeks</th>
+                                    <th>Start Date</th>
                                     <th>Location</th>
                                 </tr>
                             </thead>
@@ -2935,12 +2972,23 @@ class CoursePlanner {
                                     const hasConflict = conflicts.length > 0;
                                     const rowStyle = hasConflict ? 'background-color: #ffebee; cursor: pointer;' : 'cursor: pointer;';
 
+                                    // Get actual start date (not just Monday of the week)
+                                    const weekStart = this.getWeekStartDate(course.startWeek);
+                                    let startDate = `Week ${course.startWeek}`;
+                                    if (weekStart) {
+                                        const firstDayOfWeek = courseDays[0]; // Use the first day the course runs
+                                        const actualStartDate = new Date(weekStart);
+                                        // weekStart is Monday (day 1), so add days to get to the actual first day
+                                        actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+                                        startDate = this.formatDate(actualStartDate);
+                                    }
+
                                     return `
                                     <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="${rowStyle}">
-                                        <td>${course.name}</td>
+                                        <td>${course.code} | ${course.name}</td>
                                         <td>${daysList}</td>
                                         <td>${course.startTime} - ${course.endTime}</td>
-                                        <td>${course.startWeek}-${course.startWeek + course.duration - 1}</td>
+                                        <td>${startDate}</td>
                                         <td>${this.getLocationName(course.locationId)}</td>
                                     </tr>
                                 `;}).join('')}
@@ -3008,7 +3056,12 @@ class CoursePlanner {
         // Sort by total hours descending
         tutorWorkload.sort((a, b) => b.totalHours - a.totalHours);
 
-        let html = '<h3>Tutor Workload - Hours per Week</h3>';
+        let html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0;">Tutor Workload - Hours per Week</h3>
+                <button id="btn-export-tutor-workload" class="btn btn-primary" onclick="planner.exportTutorWorkloadToExcel()">📊 Export to Excel</button>
+            </div>
+        `;
 
         tutorWorkload.forEach(data => {
             html += `
@@ -3069,7 +3122,7 @@ class CoursePlanner {
                                     <th>Course</th>
                                     <th>Day</th>
                                     <th>Time</th>
-                                    <th>Weeks</th>
+                                    <th>Start Date</th>
                                     <th>Tutor</th>
                                 </tr>
                             </thead>
@@ -3083,12 +3136,23 @@ class CoursePlanner {
                                     const hasConflict = conflicts.length > 0;
                                     const rowStyle = hasConflict ? 'background-color: #ffebee; cursor: pointer;' : 'cursor: pointer;';
 
+                                    // Get actual start date (not just Monday of the week)
+                                    const weekStart = this.getWeekStartDate(course.startWeek);
+                                    let startDate = `Week ${course.startWeek}`;
+                                    if (weekStart) {
+                                        const firstDayOfWeek = courseDays[0]; // Use the first day the course runs
+                                        const actualStartDate = new Date(weekStart);
+                                        // weekStart is Monday (day 1), so add days to get to the actual first day
+                                        actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+                                        startDate = this.formatDate(actualStartDate);
+                                    }
+
                                     return `
                                     <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="${rowStyle}">
-                                        <td>${course.name}</td>
+                                        <td>${course.code} | ${course.name}</td>
                                         <td>${daysList}</td>
                                         <td>${course.startTime} - ${course.endTime}</td>
-                                        <td>${course.startWeek}-${course.startWeek + course.duration - 1}</td>
+                                        <td>${startDate}</td>
                                         <td>${this.getTutorName(course.tutorId)}</td>
                                     </tr>
                                 `;}).join('')}
@@ -3108,7 +3172,10 @@ class CoursePlanner {
         const sortedCourses = [...this.courses].sort((a, b) => a.startWeek - b.startWeek);
 
         const html = `
-            <h3>Course List</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0;">Course List</h3>
+                <button id="btn-export-course-list" class="btn btn-primary" onclick="planner.exportCourseListToExcel()">📊 Export to Excel</button>
+            </div>
             <table class="report-table">
                 <thead>
                     <tr>
@@ -3117,7 +3184,7 @@ class CoursePlanner {
                         <th>Location</th>
                         <th>Day</th>
                         <th>Time</th>
-                        <th>Start Week</th>
+                        <th>Start Date</th>
                         <th>Duration</th>
                     </tr>
                 </thead>
@@ -3125,14 +3192,26 @@ class CoursePlanner {
                     ${sortedCourses.map(course => {
                         const courseDays = course.daysOfWeek || [course.dayOfWeek];
                         const daysList = courseDays.map(d => days[d]).join('/');
+
+                        // Get actual start date (not just Monday of the week)
+                        const weekStart = this.getWeekStartDate(course.startWeek);
+                        let startDate = `Week ${course.startWeek}`;
+                        if (weekStart) {
+                            const firstDayOfWeek = courseDays[0]; // Use the first day the course runs
+                            const actualStartDate = new Date(weekStart);
+                            // weekStart is Monday (day 1), so add days to get to the actual first day
+                            actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+                            startDate = this.formatDate(actualStartDate);
+                        }
+
                         return `
                         <tr class="clickable-row" onclick="planner.openCourseModal('${course.id}')" style="cursor: pointer;">
-                            <td style="border-left: 4px solid ${course.color}">${course.name}</td>
+                            <td style="border-left: 4px solid ${course.color}">${course.code} | ${course.name}</td>
                             <td>${this.getTutorName(course.tutorId)}</td>
                             <td>${this.getLocationName(course.locationId)}</td>
                             <td>${daysList}</td>
                             <td>${course.startTime} - ${course.endTime}</td>
-                            <td>${course.startWeek}</td>
+                            <td>${startDate}</td>
                             <td>${course.duration} weeks</td>
                         </tr>
                     `;}).join('')}
@@ -3233,7 +3312,7 @@ class CoursePlanner {
                             <th>Course Name</th>
                             <th>Day</th>
                             <th>Time</th>
-                            <th>Weeks</th>
+                            <th>Start Date</th>
                             <th>Issues</th>
                         </tr>
                     </thead>
@@ -3241,12 +3320,24 @@ class CoursePlanner {
                         ${coursesWithIssues.map(item => {
                             const courseDays = item.course.daysOfWeek || [item.course.dayOfWeek];
                             const daysList = courseDays.map(d => days[d]).join('/');
+
+                            // Get actual start date (not just Monday of the week)
+                            const weekStart = this.getWeekStartDate(item.course.startWeek);
+                            let startDate = `Week ${item.course.startWeek}`;
+                            if (weekStart) {
+                                const firstDayOfWeek = courseDays[0]; // Use the first day the course runs
+                                const actualStartDate = new Date(weekStart);
+                                // weekStart is Monday (day 1), so add days to get to the actual first day
+                                actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+                                startDate = this.formatDate(actualStartDate);
+                            }
+
                             return `
                             <tr class="clickable-row" onclick="planner.openCourseModal('${item.course.id}')" style="cursor: pointer;">
-                                <td style="border-left: 4px solid ${item.course.color}">${item.course.name}</td>
+                                <td style="border-left: 4px solid ${item.course.color}">${item.course.code} ${item.course.name}</td>
                                 <td>${daysList}</td>
                                 <td>${item.course.startTime} - ${item.course.endTime}</td>
-                                <td>${item.course.startWeek}-${item.course.startWeek + item.course.duration - 1}</td>
+                                <td>${startDate}</td>
                                 <td style="color: var(--error-color);">${item.issues.join('; ')}</td>
                             </tr>
                         `;}).join('')}
@@ -3259,7 +3350,12 @@ class CoursePlanner {
     }
 
     generateAmendmentsReport(container) {
-        let html = '<h3>Course Amendments History</h3>';
+        let html = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0;">Course Amendments History</h3>
+                <button id="btn-export-amendments" class="btn btn-primary" onclick="planner.exportAmendmentsToExcel()">📊 Export to Excel</button>
+            </div>
+        `;
 
         // Collect all courses with amendments
         const coursesWithAmendments = this.courses.filter(course =>
@@ -3284,6 +3380,18 @@ class CoursePlanner {
             `;
 
             coursesWithAmendments.forEach(course => {
+                // Get actual start date (not just Monday of the week)
+                const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                const weekStart = this.getWeekStartDate(course.startWeek);
+                let courseStartDate = `Week ${course.startWeek}`;
+                if (weekStart) {
+                    const firstDayOfWeek = courseDays[0]; // Use the first day the course runs
+                    const actualStartDate = new Date(weekStart);
+                    // weekStart is Monday (day 1), so add days to get to the actual first day
+                    actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+                    courseStartDate = this.formatDate(actualStartDate);
+                }
+
                 html += `
                     <div style="margin-bottom: 2rem; padding: 1.5rem; background: white; border-radius: 8px; border: 1px solid var(--gray-300); box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
@@ -3294,7 +3402,8 @@ class CoursePlanner {
                         </div>
                         <div style="margin-bottom: 0.5rem; color: var(--gray-600); font-size: 0.9rem;">
                             <strong>Current Details:</strong>
-                            Weeks ${course.startWeek}-${course.startWeek + course.duration - 1},
+                            Start ${courseStartDate},
+                            ${course.duration} weeks,
                             ${course.startTime}-${course.endTime},
                             ${this.getTutorName(course.tutorId)} at ${this.getLocationName(course.locationId)}
                         </div>
@@ -3337,6 +3446,639 @@ class CoursePlanner {
         }
 
         container.innerHTML = html;
+    }
+
+    exportAmendmentsToExcel() {
+        // Collect all courses with amendments
+        const coursesWithAmendments = this.courses.filter(course =>
+            course.amendments && course.amendments.length > 0
+        );
+
+        if (coursesWithAmendments.length === 0) {
+            alert('No course amendments to export.');
+            return;
+        }
+
+        // Sort courses by most recent amendment
+        coursesWithAmendments.sort((a, b) => {
+            const aLatest = new Date(a.amendments[a.amendments.length - 1].timestamp);
+            const bLatest = new Date(b.amendments[b.amendments.length - 1].timestamp);
+            return bLatest - aLatest;
+        });
+
+        // Prepare data for Excel
+        const excelData = [];
+
+        // Add summary header
+        const totalAmendments = coursesWithAmendments.reduce((sum, c) => sum + c.amendments.length, 0);
+        excelData.push(['Course Amendments History Report']);
+        excelData.push(['Generated:', new Date().toLocaleString('en-GB')]);
+        excelData.push(['Total Courses with Amendments:', coursesWithAmendments.length]);
+        excelData.push(['Total Amendments:', totalAmendments]);
+        excelData.push([]); // Empty row
+
+        // Process each course with amendments
+        coursesWithAmendments.forEach((course, courseIndex) => {
+            // Calculate start and end dates
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
+            const weekStart = this.getWeekStartDate(course.startWeek);
+            let courseStartDate = `Week ${course.startWeek}`;
+            let courseEndDate = '';
+            if (weekStart) {
+                const firstDayOfWeek = courseDays[0];
+                const actualStartDate = new Date(weekStart);
+                actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+
+                const endWeek = course.startWeek + course.duration - 1;
+                const endWeekStart = this.getWeekStartDate(endWeek);
+                const lastDayOfWeek = courseDays[courseDays.length - 1];
+                const actualEndDate = new Date(endWeekStart);
+                actualEndDate.setDate(actualEndDate.getDate() + (lastDayOfWeek - 1));
+
+                courseStartDate = this.formatDate(actualStartDate);
+                courseEndDate = this.formatDate(actualEndDate);
+            }
+
+            // Course header
+            excelData.push([`Course ${courseIndex + 1}: ${course.code} - ${course.name}`]);
+            excelData.push(['Current Details:']);
+            excelData.push(['', 'Start Date:', courseStartDate]);
+            excelData.push(['', 'End Date:', courseEndDate]);
+            excelData.push(['', 'Duration:', `${course.duration} weeks`]);
+            excelData.push(['', 'Time:', `${course.startTime} - ${course.endTime}`]);
+            excelData.push(['', 'Tutor:', this.getTutorName(course.tutorId)]);
+            excelData.push(['', 'Location:', this.getLocationName(course.locationId)]);
+            excelData.push([]); // Empty row
+
+            // Amendment table header
+            excelData.push(['', 'Amendment #', 'Date & Time', 'Reason', 'Changes']);
+
+            // Add each amendment (in reverse chronological order)
+            [...course.amendments].reverse().forEach((amendment, amendIndex) => {
+                const date = new Date(amendment.timestamp);
+                const formattedDate = date.toLocaleString('en-GB', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+
+                const changes = amendment.changes && amendment.changes.length > 0
+                    ? amendment.changes.join('; ')
+                    : 'No specific changes recorded';
+
+                excelData.push([
+                    '',
+                    amendIndex + 1,
+                    formattedDate,
+                    amendment.reason || 'No reason provided',
+                    changes
+                ]);
+            });
+
+            excelData.push([]); // Empty row between courses
+            excelData.push([]); // Extra spacing
+        });
+
+        // Create workbook and worksheet
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+
+        // Set column widths
+        ws['!cols'] = [
+            { wch: 5 },   // Column A (indent)
+            { wch: 12 },  // Column B (Amendment #)
+            { wch: 20 },  // Column C (Date & Time)
+            { wch: 30 },  // Column D (Reason)
+            { wch: 60 }   // Column E (Changes)
+        ];
+
+        // Add worksheet to workbook
+        XLSX.utils.book_append_sheet(wb, ws, 'Course Amendments');
+
+        // Generate filename with current date
+        const today = new Date().toISOString().split('T')[0];
+        const filename = `Course_Amendments_History_${today}.xlsx`;
+
+        // Save file
+        XLSX.writeFile(wb, filename);
+
+        alert(`Export successful! File saved as: ${filename}`);
+    }
+
+    exportCourseListToExcel() {
+        if (this.courses.length === 0) {
+            alert('No courses to export.');
+            return;
+        }
+
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+
+        // Sort courses by start week
+        const sortedCourses = [...this.courses].sort((a, b) => a.startWeek - b.startWeek);
+
+        // LAYOUT 1: All courses in a table (rows across the page)
+        const allCoursesData = [];
+
+        // Add header row
+        allCoursesData.push([
+            'Course Code',
+            'Course Name',
+            'Tutor',
+            'Location',
+            'Start Date',
+            'Duration (weeks)',
+            'Start Time',
+            'Course Duration (hours)',
+            'End Time',
+            'Days of Week',
+            'Total Number of Days',
+            'Student Count',
+            'Funded',
+            'Notes'
+        ]);
+
+        // Add each course as a row
+        sortedCourses.forEach(course => {
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
+            const daysList = courseDays.map(d => days[d]).join(', ');
+
+            // Calculate start date
+            const weekStart = this.getWeekStartDate(course.startWeek);
+            let startDateStr = `Week ${course.startWeek}`;
+            if (weekStart) {
+                const firstDayOfWeek = courseDays[0];
+                const actualStartDate = new Date(weekStart);
+                actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+                startDateStr = actualStartDate.toLocaleDateString('en-GB');
+            }
+
+            // Calculate course duration in hours
+            const startTimeParts = course.startTime.split(':');
+            const endTimeParts = course.endTime.split(':');
+            const startMinutes = parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
+            const endMinutes = parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
+            const durationHours = (endMinutes - startMinutes) / 60;
+
+            // Calculate total number of days
+            const totalDays = course.duration * courseDays.length;
+
+            allCoursesData.push([
+                course.code || 'N/A',
+                course.name,
+                this.getTutorName(course.tutorId),
+                this.getLocationName(course.locationId),
+                startDateStr,
+                course.duration,
+                course.startTime,
+                durationHours,
+                course.endTime,
+                daysList,
+                totalDays,
+                course.studentCount || 'Not specified',
+                course.funded ? 'Yes' : 'No',
+                course.notes || 'None'
+            ]);
+        });
+
+        // Create worksheet for all courses table
+        const wsAll = XLSX.utils.aoa_to_sheet(allCoursesData);
+
+        // Set column widths for all courses table
+        wsAll['!cols'] = [
+            { wch: 15 },  // Course Code
+            { wch: 30 },  // Course Name
+            { wch: 20 },  // Tutor
+            { wch: 20 },  // Location
+            { wch: 12 },  // Start Date
+            { wch: 12 },  // Duration (weeks)
+            { wch: 10 },  // Start Time
+            { wch: 18 },  // Course Duration (hours)
+            { wch: 10 },  // End Time
+            { wch: 20 },  // Days of Week
+            { wch: 18 },  // Total Number of Days
+            { wch: 15 },  // Student Count
+            { wch: 10 },  // Funded
+            { wch: 30 }   // Notes
+        ];
+
+        // Add "All Courses" worksheet as the first tab
+        XLSX.utils.book_append_sheet(wb, wsAll, 'All Courses');
+
+        // LAYOUT 2: Individual tabs for each course (vertical layout)
+        // Track used sheet names to handle duplicates
+        const usedSheetNames = new Set(['All Courses']);
+
+        sortedCourses.forEach((course, index) => {
+            // Calculate course details
+            const courseDays = course.daysOfWeek || [course.dayOfWeek];
+            const daysList = courseDays.map(d => days[d]).join(', ');
+
+            // Calculate start date
+            const weekStart = this.getWeekStartDate(course.startWeek);
+            let startDateStr = `Week ${course.startWeek}`;
+            if (weekStart) {
+                const firstDayOfWeek = courseDays[0];
+                const actualStartDate = new Date(weekStart);
+                actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+                startDateStr = actualStartDate.toLocaleDateString('en-GB');
+            }
+
+            // Calculate course duration in hours
+            const startTimeParts = course.startTime.split(':');
+            const endTimeParts = course.endTime.split(':');
+            const startMinutes = parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
+            const endMinutes = parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
+            const durationHours = (endMinutes - startMinutes) / 60;
+
+            // Calculate total number of days
+            const totalDays = course.duration * courseDays.length;
+
+            // Prepare data for this course
+            const courseData = [
+                ['Course Code', course.code || 'N/A'],
+                ['Course Name', course.name],
+                ['Tutor', this.getTutorName(course.tutorId)],
+                ['Location', this.getLocationName(course.locationId)],
+                ['Start Date', startDateStr],
+                ['Duration (weeks)', course.duration],
+                ['Start Time', course.startTime],
+                ['Course Duration (hours)', durationHours],
+                ['End Time', course.endTime],
+                ['Days of Week', daysList],
+                ['Total Number of Days', totalDays],
+                [],
+                ['Additional Information'],
+                ['Student Count', course.studentCount || 'Not specified'],
+                ['Funded', course.funded ? 'Yes' : 'No'],
+                ['Notes', course.notes || 'None']
+            ];
+
+            // Create worksheet
+            const ws = XLSX.utils.aoa_to_sheet(courseData);
+
+            // Set column widths
+            ws['!cols'] = [
+                { wch: 25 },  // Column A (labels)
+                { wch: 40 }   // Column B (values)
+            ];
+
+            // Create a safe sheet name (Excel has 31 char limit and doesn't allow certain chars)
+            let sheetName = course.code || `Course ${index + 1}`;
+            // Remove invalid characters for Excel sheet names
+            sheetName = sheetName.replace(/[\\\/\*\?\[\]:]/g, '_');
+            // Truncate to 31 characters
+            if (sheetName.length > 31) {
+                sheetName = sheetName.substring(0, 31);
+            }
+
+            // Handle duplicate sheet names by adding a number suffix
+            let finalSheetName = sheetName;
+            let counter = 1;
+            while (usedSheetNames.has(finalSheetName)) {
+                const suffix = `_${counter}`;
+                // Make sure the name with suffix doesn't exceed 31 chars
+                const maxBaseLength = 31 - suffix.length;
+                finalSheetName = sheetName.substring(0, maxBaseLength) + suffix;
+                counter++;
+            }
+            usedSheetNames.add(finalSheetName);
+
+            // Add worksheet to workbook
+            XLSX.utils.book_append_sheet(wb, ws, finalSheetName);
+        });
+
+        // Generate filename with current date
+        const today = new Date().toISOString().split('T')[0];
+        const filename = `Course_List_${today}.xlsx`;
+
+        // Save file
+        XLSX.writeFile(wb, filename);
+
+        alert(`Export successful! ${sortedCourses.length} courses exported to ${filename}\n\nThe file contains:\n- "All Courses" tab with table layout\n- Individual tabs for each course`);
+    }
+
+    exportTutorSchedulesToExcel() {
+        if (this.tutors.length === 0) {
+            alert('No tutors to export.');
+            return;
+        }
+
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+
+        // LAYOUT 1: Summary tab with all tutors
+        const summaryData = [];
+        summaryData.push(['Tutor Schedules Summary']);
+        summaryData.push(['Generated:', new Date().toLocaleString('en-GB')]);
+        summaryData.push(['Total Tutors:', this.tutors.length]);
+        summaryData.push(['Total Courses:', this.courses.length]);
+        summaryData.push([]);
+        summaryData.push(['Tutor', 'Number of Courses', 'Total Hours per Week', 'Contact Info']);
+
+        // Calculate summary for each tutor
+        this.tutors.forEach(tutor => {
+            const tutorCourses = this.courses.filter(c => c.tutorId === tutor.id);
+
+            // Calculate total hours per week for this tutor
+            let totalHoursPerWeek = 0;
+            tutorCourses.forEach(course => {
+                const startTimeParts = course.startTime.split(':');
+                const endTimeParts = course.endTime.split(':');
+                const startMinutes = parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
+                const endMinutes = parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
+                const hoursPerSession = (endMinutes - startMinutes) / 60;
+                const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                totalHoursPerWeek += hoursPerSession * courseDays.length;
+            });
+
+            summaryData.push([
+                tutor.name,
+                tutorCourses.length,
+                totalHoursPerWeek.toFixed(1),
+                tutor.email || tutor.phone || 'Not provided'
+            ]);
+        });
+
+        // Create summary worksheet
+        const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+        wsSummary['!cols'] = [
+            { wch: 25 },  // Tutor name
+            { wch: 18 },  // Number of courses
+            { wch: 20 },  // Total hours
+            { wch: 30 }   // Contact info
+        ];
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+        // LAYOUT 2: Individual tab for each tutor with their full schedule
+        this.tutors.forEach(tutor => {
+            const tutorCourses = this.courses.filter(c => c.tutorId === tutor.id);
+
+            // Prepare data for this tutor
+            const tutorData = [];
+            tutorData.push([tutor.name]);
+            tutorData.push(['Email:', tutor.email || 'Not provided']);
+            tutorData.push(['Phone:', tutor.phone || 'Not provided']);
+            tutorData.push(['Skills:', tutor.skills || 'Not specified']);
+            tutorData.push([]);
+
+            if (tutorCourses.length === 0) {
+                tutorData.push(['No courses assigned to this tutor']);
+            } else {
+                tutorData.push(['Total Courses:', tutorCourses.length]);
+                tutorData.push([]);
+
+                // Course table header
+                tutorData.push([
+                    'Course Code',
+                    'Course Name',
+                    'Days',
+                    'Start Time',
+                    'End Time',
+                    'Duration (hours)',
+                    'Start Date',
+                    'Duration (weeks)',
+                    'Location',
+                    'Student Count'
+                ]);
+
+                // Add each course
+                tutorCourses.forEach(course => {
+                    const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                    const daysList = courseDays.map(d => days[d]).join(', ');
+
+                    // Calculate start date
+                    const weekStart = this.getWeekStartDate(course.startWeek);
+                    let startDateStr = `Week ${course.startWeek}`;
+                    if (weekStart) {
+                        const firstDayOfWeek = courseDays[0];
+                        const actualStartDate = new Date(weekStart);
+                        actualStartDate.setDate(actualStartDate.getDate() + (firstDayOfWeek - 1));
+                        startDateStr = actualStartDate.toLocaleDateString('en-GB');
+                    }
+
+                    // Calculate course duration in hours
+                    const startTimeParts = course.startTime.split(':');
+                    const endTimeParts = course.endTime.split(':');
+                    const startMinutes = parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
+                    const endMinutes = parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
+                    const durationHours = (endMinutes - startMinutes) / 60;
+
+                    tutorData.push([
+                        course.code || 'N/A',
+                        course.name,
+                        daysList,
+                        course.startTime,
+                        course.endTime,
+                        durationHours,
+                        startDateStr,
+                        course.duration,
+                        this.getLocationName(course.locationId),
+                        course.studentCount || 'Not specified'
+                    ]);
+                });
+            }
+
+            // Create worksheet for this tutor
+            const ws = XLSX.utils.aoa_to_sheet(tutorData);
+            ws['!cols'] = [
+                { wch: 15 },  // Course Code
+                { wch: 30 },  // Course Name
+                { wch: 15 },  // Days
+                { wch: 10 },  // Start Time
+                { wch: 10 },  // End Time
+                { wch: 15 },  // Duration (hours)
+                { wch: 12 },  // Start Date
+                { wch: 15 },  // Duration (weeks)
+                { wch: 20 },  // Location
+                { wch: 15 }   // Student Count
+            ];
+
+            // Create safe sheet name
+            let sheetName = tutor.name;
+            // Remove invalid characters for Excel sheet names
+            sheetName = sheetName.replace(/[\\\/\*\?\[\]:]/g, '_');
+            // Truncate to 31 characters
+            if (sheetName.length > 31) {
+                sheetName = sheetName.substring(0, 31);
+            }
+
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        });
+
+        // Generate filename with current date
+        const today = new Date().toISOString().split('T')[0];
+        const filename = `Tutor_Schedules_${today}.xlsx`;
+
+        // Save file
+        XLSX.writeFile(wb, filename);
+
+        alert(`Export successful! ${this.tutors.length} tutors exported to ${filename}\n\nThe file contains:\n- "Summary" tab with overview of all tutors\n- Individual tabs for each tutor with their full schedule`);
+    }
+
+    exportTutorWorkloadToExcel() {
+        if (this.tutors.length === 0) {
+            alert('No tutors to export.');
+            return;
+        }
+
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+
+        // Calculate hours for each tutor per week
+        const tutorWorkload = [];
+
+        this.tutors.forEach(tutor => {
+            const weeklyHours = new Array(40).fill(0); // 40 weeks
+
+            // Get all courses for this tutor
+            const tutorCourses = this.courses.filter(c => c.tutorId === tutor.id);
+
+            tutorCourses.forEach(course => {
+                // Calculate hours per session
+                const startParts = course.startTime.split(':');
+                const endParts = course.endTime.split(':');
+                const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
+                const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
+                const hoursPerSession = (endMinutes - startMinutes) / 60;
+
+                // Get number of days per week for this course
+                const courseDays = course.daysOfWeek || [course.dayOfWeek];
+                const sessionsPerWeek = courseDays.length;
+
+                // Calculate total hours per week for this course
+                const hoursPerWeek = hoursPerSession * sessionsPerWeek;
+
+                // Add to each week the course runs
+                for (let week = course.startWeek - 1; week < course.startWeek - 1 + course.duration; week++) {
+                    if (week >= 0 && week < 40) {
+                        weeklyHours[week] += hoursPerWeek;
+                    }
+                }
+            });
+
+            // Calculate statistics
+            const totalHours = weeklyHours.reduce((sum, hours) => sum + hours, 0);
+            const weeksWorked = weeklyHours.filter(hours => hours > 0).length;
+            const averageHours = weeksWorked > 0 ? totalHours / weeksWorked : 0;
+            const maxHours = Math.max(...weeklyHours);
+
+            tutorWorkload.push({
+                tutor,
+                weeklyHours,
+                totalHours,
+                weeksWorked,
+                averageHours,
+                maxHours
+            });
+        });
+
+        // Sort by total hours descending
+        tutorWorkload.sort((a, b) => b.totalHours - a.totalHours);
+
+        // LAYOUT 1: Summary tab with all tutors statistics
+        const summaryData = [];
+        summaryData.push(['Tutor Workload Report - Hours per Week']);
+        summaryData.push(['Generated:', new Date().toLocaleString('en-GB')]);
+        summaryData.push(['Total Tutors:', this.tutors.length]);
+        summaryData.push([]);
+        summaryData.push(['Tutor', 'Total Hours', 'Weeks Worked', 'Average Hours/Week', 'Peak Hours/Week', 'Courses Assigned']);
+
+        tutorWorkload.forEach(data => {
+            const tutorCourses = this.courses.filter(c => c.tutorId === data.tutor.id);
+            summaryData.push([
+                data.tutor.name,
+                parseFloat(data.totalHours.toFixed(1)),
+                data.weeksWorked,
+                parseFloat(data.averageHours.toFixed(1)),
+                parseFloat(data.maxHours.toFixed(1)),
+                tutorCourses.length
+            ]);
+        });
+
+        // Create summary worksheet
+        const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+        wsSummary['!cols'] = [
+            { wch: 25 },  // Tutor name
+            { wch: 12 },  // Total hours
+            { wch: 15 },  // Weeks worked
+            { wch: 18 },  // Average hours
+            { wch: 15 },  // Peak hours
+            { wch: 16 }   // Courses assigned
+        ];
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+        // LAYOUT 2: Individual tab for each tutor with weekly breakdown
+        const usedSheetNames = new Set(['Summary']);
+
+        tutorWorkload.forEach((data) => {
+            const tutorData = [];
+            tutorData.push([data.tutor.name]);
+            tutorData.push([]);
+            tutorData.push(['Statistics:']);
+            tutorData.push(['Total Hours:', parseFloat(data.totalHours.toFixed(1))]);
+            tutorData.push(['Weeks Worked:', data.weeksWorked, '/ 40']);
+            tutorData.push(['Average Hours/Week:', parseFloat(data.averageHours.toFixed(1)), '(when working)']);
+            tutorData.push(['Peak Hours/Week:', parseFloat(data.maxHours.toFixed(1))]);
+            tutorData.push([]);
+            tutorData.push(['Weekly Breakdown:']);
+            tutorData.push(['Week', 'Hours']);
+
+            // Add each week with hours (only weeks with hours > 0)
+            data.weeklyHours.forEach((hours, weekIndex) => {
+                if (hours > 0) {
+                    tutorData.push([
+                        weekIndex + 1,
+                        parseFloat(hours.toFixed(1))
+                    ]);
+                }
+            });
+
+            // Create worksheet for this tutor
+            const ws = XLSX.utils.aoa_to_sheet(tutorData);
+            ws['!cols'] = [
+                { wch: 20 },  // Week or label column
+                { wch: 15 },  // Hours or value column
+                { wch: 15 }   // Additional info column
+            ];
+
+            // Create safe sheet name
+            let sheetName = data.tutor.name;
+            // Remove invalid characters for Excel sheet names
+            sheetName = sheetName.replace(/[\\\/\*\?\[\]:]/g, '_');
+            // Truncate to 31 characters
+            if (sheetName.length > 31) {
+                sheetName = sheetName.substring(0, 31);
+            }
+
+            // Handle duplicate sheet names
+            let finalSheetName = sheetName;
+            let counter = 1;
+            while (usedSheetNames.has(finalSheetName)) {
+                const suffix = `_${counter}`;
+                const maxBaseLength = 31 - suffix.length;
+                finalSheetName = sheetName.substring(0, maxBaseLength) + suffix;
+                counter++;
+            }
+            usedSheetNames.add(finalSheetName);
+
+            XLSX.utils.book_append_sheet(wb, ws, finalSheetName);
+        });
+
+        // Generate filename with current date
+        const today = new Date().toISOString().split('T')[0];
+        const filename = `Tutor_Workload_${today}.xlsx`;
+
+        // Save file
+        XLSX.writeFile(wb, filename);
+
+        alert(`Export successful! ${tutorWorkload.length} tutors exported to ${filename}\n\nThe file contains:\n- "Summary" tab with workload statistics for all tutors\n- Individual tabs for each tutor with weekly hour breakdown`);
     }
 
     // Export Functions
