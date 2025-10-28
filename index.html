@@ -13,6 +13,7 @@
             <h1>Course Planner</h1>
             <div class="header-actions">
                 <button id="btn-dashboard" class="btn btn-secondary">Dashboard</button>
+                <button id="btn-unavailable" class="btn btn-secondary">Unavailable Dates</button>
                 <button id="btn-tutors" class="btn btn-secondary">Tutors</button>
                 <button id="btn-locations" class="btn btn-secondary">Locations</button>
                 <button id="btn-courses" class="btn btn-secondary">Courses</button>
@@ -89,6 +90,20 @@
                 </div>
             </section>
 
+            <!-- Unavailable Dates View -->
+            <section id="view-unavailable" class="view">
+                <div class="view-header">
+                    <h2>Manage Unavailable Dates</h2>
+                    <button id="btn-add-unavailable-date" class="btn btn-primary">Add Unavailable Date</button>
+                </div>
+                <div class="dashboard-card" style="margin-bottom: 1.5rem;">
+                    <p style="color: var(--gray-600); margin-bottom: 1rem;">
+                        Mark dates when courses cannot be scheduled (holidays, closures, etc.). These dates will appear greyed out in the calendar and cannot be used for course scheduling.
+                    </p>
+                </div>
+                <div id="unavailable-dates-grid" class="locations-grid"></div>
+            </section>
+
             <!-- Tutors View -->
             <section id="view-tutors" class="view">
                 <div class="view-header">
@@ -146,6 +161,7 @@
                             <option value="course-list">Course List</option>
                             <option value="conflicts">Conflicts Report</option>
                             <option value="unavailable-resources">Courses with Unavailable Resources</option>
+                            <option value="amendments">Course Amendments History</option>
                         </select>
                         <button id="btn-generate-report" class="btn btn-primary">Generate</button>
                     </div>
@@ -258,6 +274,25 @@
                         <input type="text" id="course-name" class="input" required>
                     </div>
                     <div class="form-group">
+                        <label for="course-code">Course Code</label>
+                        <input type="text" id="course-code" class="input" required>
+                    </div>
+                    <div class="form-group" id="amendment-reason-group" style="display: none;">
+                        <label for="amendment-reason">Reason for Amendment <span style="color: red;">*</span></label>
+                        <select id="amendment-reason" class="select">
+                            <option value="">-- Select a reason --</option>
+                            <option value="Venue not available">Venue not available</option>
+                            <option value="Lack of tutor resource">Lack of tutor resource</option>
+                            <option value="Course cancelled">Course cancelled</option>
+                            <option value="Student demand change">Student demand change</option>
+                            <option value="Schedule conflict">Schedule conflict</option>
+                            <option value="Other">Other</option>
+                        </select>
+                        <p style="font-size: 0.85rem; color: var(--gray-600); margin-top: 0.5rem;">
+                            Required when editing an existing course
+                        </p>
+                    </div>
+                    <div class="form-group">
                         <label for="course-color">Color</label>
                         <div style="display: flex; gap: 1rem; align-items: center;">
                             <input type="color" id="course-color" class="input" value="#4a90e2" style="width: 80px; height: 40px; cursor: pointer;">
@@ -302,7 +337,7 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label for="course-start-week">Start Week</label>
-                            <input type="number" id="course-start-week" class="input" min="1" max="40" required>
+                            <select id="course-start-week" class="select" required></select>
                         </div>
                         <div class="form-group">
                             <label for="course-duration">Duration (weeks)</label>
@@ -332,14 +367,6 @@
                                 <input type="checkbox" name="course-day" value="5" style="width: 18px; height: 18px; cursor: pointer;">
                                 <span>Fri</span>
                             </label>
-                            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
-                                <input type="checkbox" name="course-day" value="6" style="width: 18px; height: 18px; cursor: pointer;">
-                                <span>Sat</span>
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">
-                                <input type="checkbox" name="course-day" value="0" style="width: 18px; height: 18px; cursor: pointer;">
-                                <span>Sun</span>
-                            </label>
                         </div>
                     </div>
                     <div class="form-row">
@@ -348,9 +375,13 @@
                             <input type="time" id="course-start-time" class="input" required>
                         </div>
                         <div class="form-group">
-                            <label for="course-end-time">End Time</label>
-                            <input type="time" id="course-end-time" class="input" required>
+                            <label for="course-duration-hours">Duration (hours)</label>
+                            <input type="number" id="course-duration-hours" class="input" min="0.5" max="8" step="0.5" placeholder="e.g., 2.5" required>
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="course-end-time">End Time (auto-calculated)</label>
+                        <input type="time" id="course-end-time" class="input" required readonly style="background-color: var(--gray-100);">
                     </div>
                     <div class="form-group">
                         <label for="course-notes">Notes</label>
@@ -421,6 +452,56 @@
                     <button type="button" class="btn btn-secondary" data-modal="modal-paste-json">Cancel</button>
                     <button id="btn-process-paste" class="btn btn-primary">Import Pasted JSON</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Adding/Editing Unavailable Date -->
+    <div id="modal-unavailable-date" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="unavailable-date-modal-title">Add Unavailable Date</h3>
+                <button class="btn-close" data-modal="modal-unavailable-date">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-unavailable-date">
+                    <input type="hidden" id="unavailable-date-id">
+                    <div class="form-group">
+                        <label>Date Type</label>
+                        <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="radio" name="date-type" value="single" checked style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Single Date</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="radio" name="date-type" value="range" style="width: 18px; height: 18px; cursor: pointer;">
+                                <span>Date Range</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group" id="single-date-group">
+                        <label for="unavailable-date">Date</label>
+                        <input type="date" id="unavailable-date" class="input" required>
+                    </div>
+                    <div id="date-range-group" style="display: none;">
+                        <div class="form-group">
+                            <label for="unavailable-start-date">Start Date</label>
+                            <input type="date" id="unavailable-start-date" class="input">
+                        </div>
+                        <div class="form-group">
+                            <label for="unavailable-end-date">End Date</label>
+                            <input type="date" id="unavailable-end-date" class="input">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="unavailable-reason">Reason</label>
+                        <input type="text" id="unavailable-reason" class="input" placeholder="e.g., Christmas Holiday, Staff Training" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" data-modal="modal-unavailable-date">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>

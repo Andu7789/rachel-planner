@@ -466,11 +466,11 @@ body {
 
 .calendar-grid {
     display: grid;
-    grid-template-columns: 80px repeat(7, 1fr);
-    gap: 1px;
+    grid-template-columns: 80px repeat(80, 1fr);
+    gap: 0;
     background: var(--gray-300);
     border: 1px solid var(--gray-300);
-    min-width: 900px;
+    min-width: 700px;
 }
 
 .calendar-header {
@@ -482,6 +482,8 @@ body {
     font-size: 0.9rem;
     position: sticky;
     z-index: 20;
+    border-bottom: 1px solid var(--gray-300);
+    border-right: 1px solid var(--gray-300);
 }
 
 .calendar-week-header {
@@ -511,15 +513,25 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
+    border-bottom: 1px solid var(--gray-300);
+    border-right: 1px solid var(--gray-300);
 }
 
 .calendar-cell {
     background: white;
     padding: 0.5rem;
     min-height: 60px;
+    height: 60px;
     position: relative;
     cursor: pointer;
     transition: background 0.2s ease;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    overflow: visible;
+    border-bottom: 1px solid var(--gray-300);
+    border-right: 1px solid var(--gray-300);
 }
 
 .calendar-cell.weekend {
@@ -538,15 +550,40 @@ body {
     background: var(--gray-100);
 }
 
+.calendar-cell.unavailable-date {
+    background: repeating-linear-gradient(
+        45deg,
+        #f5f5f5,
+        #f5f5f5 10px,
+        #e8e8e8 10px,
+        #e8e8e8 20px
+    );
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.calendar-cell.unavailable-date:hover {
+    background: repeating-linear-gradient(
+        45deg,
+        #f0f0f0,
+        #f0f0f0 10px,
+        #e0e0e0 10px,
+        #e0e0e0 20px
+    );
+}
+
 .course-block {
     padding: 0.5rem;
-    margin: 2px 0;
+    margin: 0;
     border-radius: 4px;
     font-size: 0.8rem;
     cursor: pointer;
     transition: var(--transition);
     border-left: 4px solid;
     position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .course-block:hover {

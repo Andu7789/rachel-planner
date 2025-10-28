@@ -6,6 +6,7 @@ class CoursePlanner {
         this.tutors = [];
         this.locations = [];
         this.courses = [];
+        this.unavailableDates = [];  // Store dates when courses cannot be scheduled
         this.currentView = 'dashboard';
         this.calendarWeekOffset = 0;
         this.calendarViewMode = '4weeks';
@@ -33,6 +34,7 @@ class CoursePlanner {
             this.tutors = data.tutors || [];
             this.locations = data.locations || [];
             this.courses = data.courses || [];
+            this.unavailableDates = data.unavailableDates || [];
             this.week1StartDate = data.week1StartDate || null;
             this.settings = data.settings || {
                 fundedCourseColor: '#4CAF50',
@@ -43,8 +45,21 @@ class CoursePlanner {
             this.migrateOldAvailabilityData();
         }
 
-        // Update the UI
+        // Update the UI and validate Week 1 Start Date
         if (this.week1StartDate) {
+            // Ensure week1StartDate is a Monday
+            const weekStartDate = new Date(this.week1StartDate);
+            const dayOfWeek = weekStartDate.getDay();
+
+            if (dayOfWeek !== 1) {
+                // Adjust to previous Monday
+                const daysToSubtract = (dayOfWeek === 0) ? 6 : (dayOfWeek - 1);
+                weekStartDate.setDate(weekStartDate.getDate() - daysToSubtract);
+                this.week1StartDate = weekStartDate.toISOString().split('T')[0];
+                this.saveData();
+                console.warn('Week 1 Start Date was not a Monday. Auto-corrected to:', this.week1StartDate);
+            }
+
             document.getElementById('week1-start-date').value = this.week1StartDate;
         }
         this.updateCurrentWeekDisplay();
@@ -121,6 +136,7 @@ class CoursePlanner {
             tutors: this.tutors,
             locations: this.locations,
             courses: this.courses,
+            unavailableDates: this.unavailableDates,
             week1StartDate: this.week1StartDate,
             settings: this.settings
         };
@@ -184,6 +200,9 @@ class CoursePlanner {
             case 'dashboard':
                 this.renderDashboard();
                 break;
+            case 'unavailable':
+                this.renderUnavailableDates();
+                break;
             case 'tutors':
                 this.renderTutors();
                 break;
@@ -195,7 +214,8 @@ class CoursePlanner {
                 this.populateCourseSelector();
                 break;
             case 'reports':
-                // Reports are generated on demand
+                // Regenerate the current report to show latest data
+                this.generateReport();
                 break;
         }
     }
@@ -204,11 +224,30 @@ class CoursePlanner {
     setupEventListeners() {
         // Navigation
         document.getElementById('btn-dashboard').addEventListener('click', () => this.switchView('dashboard'));
+        document.getElementById('btn-unavailable').addEventListener('click', () => this.switchView('unavailable'));
         document.getElementById('btn-tutors').addEventListener('click', () => this.switchView('tutors'));
         document.getElementById('btn-locations').addEventListener('click', () => this.switchView('locations'));
         document.getElementById('btn-courses').addEventListener('click', () => this.switchView('courses'));
         document.getElementById('btn-reports').addEventListener('click', () => this.switchView('reports'));
         document.getElementById('btn-export').addEventListener('click', () => this.openModal('modal-export'));
+
+        // Unavailable Dates
+        document.getElementById('btn-add-unavailable-date').addEventListener('click', () => this.openUnavailableDateModal());
+        document.getElementById('form-unavailable-date').addEventListener('submit', (e) => this.saveUnavailableDate(e));
+
+        // Toggle between single date and date range
+        document.querySelectorAll('input[name="date-type"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const isSingle = e.target.value === 'single';
+                document.getElementById('single-date-group').style.display = isSingle ? 'block' : 'none';
+                document.getElementById('date-range-group').style.display = isSingle ? 'none' : 'block';
+
+                // Update required attributes
+                document.getElementById('unavailable-date').required = isSingle;
+                document.getElementById('unavailable-start-date').required = !isSingle;
+                document.getElementById('unavailable-end-date').required = !isSingle;
+            });
+        });
 
         // Tutors
         document.getElementById('btn-add-tutor').addEventListener('click', () => this.openTutorModal());
@@ -293,9 +332,34 @@ class CoursePlanner {
             this.updateColorPreview(e.target.value);
         });
 
+        // Auto-calculate end time based on start time and duration
+        document.getElementById('course-start-time').addEventListener('change', () => {
+            this.calculateEndTime();
+        });
+        document.getElementById('course-duration-hours').addEventListener('input', () => {
+            this.calculateEndTime();
+        });
+
         // Settings
         document.getElementById('week1-start-date').addEventListener('change', (e) => {
-            this.week1StartDate = e.target.value;
+            const selectedDate = new Date(e.target.value);
+            const dayOfWeek = selectedDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+
+            // Check if selected date is a Monday
+            if (dayOfWeek !== 1) {
+                // Find the nearest Monday (go backwards to previous Monday)
+                const daysToSubtract = (dayOfWeek === 0) ? 6 : (dayOfWeek - 1);
+                selectedDate.setDate(selectedDate.getDate() - daysToSubtract);
+
+                const adjustedDateString = selectedDate.toISOString().split('T')[0];
+                document.getElementById('week1-start-date').value = adjustedDateString;
+
+                alert(`Week 1 Start Date must be a Monday. Adjusted to ${this.formatDate(selectedDate)}`);
+                this.week1StartDate = adjustedDateString;
+            } else {
+                this.week1StartDate = e.target.value;
+            }
+
             this.saveData();
             this.updateCurrentWeekDisplay();
             this.renderDashboard();
@@ -460,7 +524,7 @@ class CoursePlanner {
                 <div class="upcoming-item-compact" style="border-left-color: ${course.color}; cursor: pointer;" onclick="planner.openCourseModal('${course.id}')">
                     <div class="upcoming-header">
                         <strong style="color: ${course.color}">
-                            ${hasAvailabilityIssue ? '<span class="conflict-indicator">!</span> ' : ''}${course.name}
+                            ${hasAvailabilityIssue ? '<span class="conflict-indicator">!</span> ' : ''}${course.name} | ${course.code || 'No code'}
                         </strong>
                         <span class="upcoming-time">${daysList} ${course.startTime}</span>
                     </div>
@@ -597,6 +661,11 @@ class CoursePlanner {
         }
 
         this.openModal('modal-tutor');
+
+        // Focus on tutor name field to bring modal to top
+        setTimeout(() => {
+            document.getElementById('tutor-name').focus();
+        }, 150);
     }
 
     populateTutorCanTeach(canTeachIds) {
@@ -927,6 +996,11 @@ class CoursePlanner {
         }
 
         this.openModal('modal-location');
+
+        // Focus on location name field to bring modal to top
+        setTimeout(() => {
+            document.getElementById('location-name').focus();
+        }, 150);
     }
 
     saveLocation(e) {
@@ -1017,6 +1091,188 @@ class CoursePlanner {
         }
     }
 
+    // Unavailable Dates Management
+    openUnavailableDateModal(dateId = null) {
+        this.editingId = dateId;
+        const modal = document.getElementById('modal-unavailable-date');
+        const title = document.getElementById('unavailable-date-modal-title');
+        const form = document.getElementById('form-unavailable-date');
+
+        form.reset();
+        document.getElementById('single-date-group').style.display = 'block';
+        document.getElementById('date-range-group').style.display = 'none';
+        document.getElementById('unavailable-date').required = true;
+        document.getElementById('unavailable-start-date').required = false;
+        document.getElementById('unavailable-end-date').required = false;
+
+        if (dateId) {
+            title.textContent = 'Edit Unavailable Date';
+            const dateEntry = this.unavailableDates.find(d => d.id === dateId);
+            if (dateEntry) {
+                document.getElementById('unavailable-date-id').value = dateEntry.id;
+                document.getElementById('unavailable-reason').value = dateEntry.reason;
+
+                if (dateEntry.type === 'range') {
+                    document.querySelector('input[name="date-type"][value="range"]').checked = true;
+                    document.getElementById('single-date-group').style.display = 'none';
+                    document.getElementById('date-range-group').style.display = 'block';
+                    document.getElementById('unavailable-date').required = false;
+                    document.getElementById('unavailable-start-date').required = true;
+                    document.getElementById('unavailable-end-date').required = true;
+                    document.getElementById('unavailable-start-date').value = dateEntry.startDate;
+                    document.getElementById('unavailable-end-date').value = dateEntry.endDate;
+                } else {
+                    document.getElementById('unavailable-date').value = dateEntry.date;
+                }
+            }
+        } else {
+            title.textContent = 'Add Unavailable Date';
+        }
+
+        this.openModal('modal-unavailable-date');
+    }
+
+    saveUnavailableDate(e) {
+        e.preventDefault();
+
+        const dateType = document.querySelector('input[name="date-type"]:checked').value;
+        const reason = document.getElementById('unavailable-reason').value;
+        const id = document.getElementById('unavailable-date-id').value || Date.now().toString();
+
+        let dateEntry;
+
+        if (dateType === 'single') {
+            const date = document.getElementById('unavailable-date').value;
+            if (!date) {
+                alert('Please select a date');
+                return;
+            }
+            dateEntry = {
+                id,
+                type: 'single',
+                date,
+                reason
+            };
+        } else {
+            const startDate = document.getElementById('unavailable-start-date').value;
+            const endDate = document.getElementById('unavailable-end-date').value;
+
+            if (!startDate || !endDate) {
+                alert('Please select both start and end dates');
+                return;
+            }
+
+            if (new Date(startDate) > new Date(endDate)) {
+                alert('End date must be after start date');
+                return;
+            }
+
+            dateEntry = {
+                id,
+                type: 'range',
+                startDate,
+                endDate,
+                reason
+            };
+        }
+
+        if (this.editingId) {
+            const index = this.unavailableDates.findIndex(d => d.id === this.editingId);
+            if (index !== -1) {
+                this.unavailableDates[index] = dateEntry;
+            }
+        } else {
+            this.unavailableDates.push(dateEntry);
+        }
+
+        console.log('Saving unavailable date:', dateEntry);
+        console.log('Total unavailable dates:', this.unavailableDates.length);
+
+        this.saveData();
+        this.closeModal('modal-unavailable-date');
+        this.renderUnavailableDates();
+        if (this.currentView === 'courses') {
+            this.renderCalendar();
+        }
+    }
+
+    renderUnavailableDates() {
+        const grid = document.getElementById('unavailable-dates-grid');
+        console.log('Rendering unavailable dates view. Count:', this.unavailableDates.length);
+
+        if (this.unavailableDates.length === 0) {
+            grid.innerHTML = '<p style="color: var(--gray-600); padding: 2rem; text-align: center;">No unavailable dates set. Click "Add Unavailable Date" to mark dates when courses cannot be scheduled.</p>';
+            return;
+        }
+
+        // Sort by date
+        const sortedDates = [...this.unavailableDates].sort((a, b) => {
+            const dateA = new Date(a.type === 'single' ? a.date : a.startDate);
+            const dateB = new Date(b.type === 'single' ? b.date : b.startDate);
+            return dateA - dateB;
+        });
+
+        grid.innerHTML = sortedDates.map(dateEntry => {
+            let dateDisplay;
+            let daysCount = 1;
+
+            if (dateEntry.type === 'range') {
+                const startDate = new Date(dateEntry.startDate);
+                const endDate = new Date(dateEntry.endDate);
+                daysCount = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+                dateDisplay = `${this.formatDate(startDate)} to ${this.formatDate(endDate)}`;
+            } else {
+                dateDisplay = this.formatDate(new Date(dateEntry.date));
+            }
+
+            return `
+                <div class="card">
+                    <div class="card-header">
+                        <h3>${dateEntry.reason}</h3>
+                        <div class="card-actions">
+                            <button class="btn btn-sm btn-secondary" onclick="planner.openUnavailableDateModal('${dateEntry.id}')">Edit</button>
+                            <button class="btn btn-sm btn-danger" onclick="planner.deleteUnavailableDate('${dateEntry.id}')">Delete</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div><strong>Date:</strong> ${dateDisplay}</div>
+                        <div><strong>Duration:</strong> ${daysCount} day${daysCount > 1 ? 's' : ''}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    deleteUnavailableDate(dateId) {
+        if (confirm('Are you sure you want to delete this unavailable date?')) {
+            this.unavailableDates = this.unavailableDates.filter(d => d.id !== dateId);
+            this.saveData();
+            this.renderUnavailableDates();
+            if (this.currentView === 'courses') {
+                this.renderCalendar();
+            }
+        }
+    }
+
+    isDateUnavailable(dateString) {
+        const checkDate = new Date(dateString);
+        checkDate.setHours(0, 0, 0, 0);
+
+        return this.unavailableDates.some(entry => {
+            if (entry.type === 'single') {
+                const unavailableDate = new Date(entry.date);
+                unavailableDate.setHours(0, 0, 0, 0);
+                return checkDate.getTime() === unavailableDate.getTime();
+            } else {
+                const startDate = new Date(entry.startDate);
+                const endDate = new Date(entry.endDate);
+                startDate.setHours(0, 0, 0, 0);
+                endDate.setHours(23, 59, 59, 999);
+                return checkDate >= startDate && checkDate <= endDate;
+            }
+        });
+    }
+
     // Course Management
     openCourseModal(courseId = null) {
         this.editingId = courseId;
@@ -1028,16 +1284,27 @@ class CoursePlanner {
         document.getElementById('location-availability-warning').style.display = 'none';
         document.getElementById('course-conflicts-warning').style.display = 'none';
 
+        // Show/hide amendment reason based on whether editing or creating
+        const amendmentReasonGroup = document.getElementById('amendment-reason-group');
+        const amendmentReasonSelect = document.getElementById('amendment-reason');
+
         if (courseId) {
+            // Editing existing course - show amendment reason dropdown
+            amendmentReasonGroup.style.display = 'block';
+            amendmentReasonSelect.required = true;
+
             const course = this.courses.find(c => c.id === courseId);
             if (course) {
                 document.getElementById('course-modal-title').textContent = 'Edit Course';
                 document.getElementById('course-id').value = course.id;
                 document.getElementById('course-name').value = course.name;
+                document.getElementById('course-code').value = course.code || '';
                 document.getElementById('course-color').value = course.color;
                 this.updateColorPreview(course.color);
                 document.getElementById('course-funded').checked = course.funded || false;
-                document.getElementById('course-start-week').value = course.startWeek;
+
+                // Populate week dropdown with dates
+                this.populateWeekDropdown(course.startWeek);
                 document.getElementById('course-duration').value = course.duration;
 
                 // Set day checkboxes (handle both old and new format)
@@ -1048,6 +1315,18 @@ class CoursePlanner {
 
                 document.getElementById('course-start-time').value = course.startTime;
                 document.getElementById('course-end-time').value = course.endTime;
+
+                // Calculate duration in hours from start and end times
+                if (course.startTime && course.endTime) {
+                    const [startHours, startMins] = course.startTime.split(':').map(Number);
+                    const [endHours, endMins] = course.endTime.split(':').map(Number);
+                    const startMinutes = startHours * 60 + startMins;
+                    const endMinutes = endHours * 60 + endMins;
+                    const durationMinutes = endMinutes - startMinutes;
+                    const durationHours = durationMinutes / 60;
+                    document.getElementById('course-duration-hours').value = durationHours;
+                }
+
                 document.getElementById('course-notes').value = course.notes || '';
                 document.getElementById('course-students').value = course.studentCount || '';
 
@@ -1076,6 +1355,9 @@ class CoursePlanner {
             document.getElementById('course-color').value = randomColor;
             this.updateColorPreview(randomColor);
 
+            // Populate week dropdown (defaults to week 1)
+            this.populateWeekDropdown(1);
+
             // Uncheck all day checkboxes for new course
             document.querySelectorAll('input[name="course-day"]').forEach(checkbox => {
                 checkbox.checked = false;
@@ -1091,6 +1373,10 @@ class CoursePlanner {
             // Hide delete and duplicate buttons for new courses
             document.getElementById('btn-delete-course').style.display = 'none';
             document.getElementById('btn-duplicate-course').style.display = 'none';
+
+            // Creating new course - hide amendment reason dropdown
+            amendmentReasonGroup.style.display = 'none';
+            amendmentReasonSelect.required = false;
         }
 
         this.openModal('modal-course');
@@ -1107,6 +1393,60 @@ class CoursePlanner {
         preview.style.borderColor = color;
         preview.style.color = color;
         preview.textContent = color.toUpperCase();
+    }
+
+    calculateEndTime() {
+        const startTime = document.getElementById('course-start-time').value;
+        const durationHours = parseFloat(document.getElementById('course-duration-hours').value);
+
+        if (!startTime || !durationHours) {
+            return;
+        }
+
+        // Parse start time
+        const [hours, minutes] = startTime.split(':').map(Number);
+
+        // Calculate end time
+        const startMinutes = hours * 60 + minutes;
+        const endMinutes = startMinutes + (durationHours * 60);
+
+        const endHours = Math.floor(endMinutes / 60);
+        const endMins = endMinutes % 60;
+
+        // Format as HH:MM
+        const endTime = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
+
+        document.getElementById('course-end-time').value = endTime;
+    }
+
+    populateWeekDropdown(selectedWeek = null) {
+        const weekSelect = document.getElementById('course-start-week');
+        let html = '';
+
+        for (let week = 1; week <= 40; week++) {
+            let label = `Week ${week}`;
+
+            // If week 1 start date is set, calculate and show the date
+            if (this.week1StartDate) {
+                const weekStartDate = new Date(this.week1StartDate);
+                weekStartDate.setDate(weekStartDate.getDate() + (week - 1) * 7);
+                const dateStr = weekStartDate.toLocaleDateString('en-GB', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric'
+                });
+                label = `Week ${week} (${dateStr})`;
+            }
+
+            html += `<option value="${week}">${label}</option>`;
+        }
+
+        weekSelect.innerHTML = html;
+
+        // Set selected value if provided
+        if (selectedWeek) {
+            weekSelect.value = selectedWeek;
+        }
     }
 
     updateResourceDropdowns() {
@@ -1593,6 +1933,7 @@ class CoursePlanner {
 
         const courseId = document.getElementById('course-id').value || this.generateId();
         const name = document.getElementById('course-name').value;
+        const code = document.getElementById('course-code').value || 'No code';
         const color = document.getElementById('course-color').value;
         const funded = document.getElementById('course-funded').checked;
         const tutorId = document.getElementById('course-tutor').value;
@@ -1623,6 +1964,7 @@ class CoursePlanner {
         const course = {
             id: courseId,
             name,
+            code,
             color,
             funded,
             tutorId,
@@ -1635,7 +1977,7 @@ class CoursePlanner {
             notes,
             studentCount,
             qualifiedTutors
-        };
+        }; console.log(course);
 
         // Check tutor availability for all selected days
         const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -1666,6 +2008,52 @@ class CoursePlanner {
             }
         }
 
+        // Check if course falls on any unavailable dates
+        const unavailableDateConflicts = [];
+        for (let week = startWeek; week < startWeek + duration; week++) {
+            const weekStart = this.getWeekStartDate(week);
+            if (!weekStart) continue;
+
+            daysOfWeek.forEach(dayOfWeek => {
+                const courseDate = new Date(weekStart);
+                // weekStart is guaranteed to be Monday (day 1)
+                // dayOfWeek: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 0=Sun
+                // For Sunday (0), we need to add 6 days to get to the Sunday of that week
+                const daysOffset = dayOfWeek === 0 ? 6 : (dayOfWeek - 1);
+                courseDate.setDate(courseDate.getDate() + daysOffset);
+                const courseDateString = courseDate.toISOString().split('T')[0];
+
+                if (this.isDateUnavailable(courseDateString)) {
+                    const unavailableEntry = this.unavailableDates.find(entry => {
+                        if (entry.type === 'single') {
+                            return entry.date === courseDateString;
+                        } else {
+                            const checkDate = new Date(courseDateString);
+                            const startDate = new Date(entry.startDate);
+                            const endDate = new Date(entry.endDate);
+                            return checkDate >= startDate && checkDate <= endDate;
+                        }
+                    });
+
+                    const reason = unavailableEntry ? unavailableEntry.reason : 'Unknown reason';
+                    unavailableDateConflicts.push({
+                        date: this.formatDate(courseDate),
+                        day: days[dayOfWeek],
+                        week: week,
+                        reason: reason
+                    });
+                }
+            });
+        }
+
+        if (unavailableDateConflicts.length > 0) {
+            const conflictList = unavailableDateConflicts
+                .map(c => `- Week ${c.week}, ${c.day} (${c.date}): ${c.reason}`)
+                .join('\n');
+            alert(`ERROR: This course cannot be scheduled because it falls on unavailable dates:\n\n${conflictList}\n\nPlease adjust the course schedule or remove the unavailable dates.`);
+            return;
+        }
+
         // Check for double-booking conflicts on all days
         const conflicts = this.checkCourseConflicts(course);
         if (conflicts.length > 0) {
@@ -1677,8 +2065,33 @@ class CoursePlanner {
 
         const existingIndex = this.courses.findIndex(c => c.id === courseId);
         if (existingIndex >= 0) {
+            // Editing existing course - record amendment
+            const amendmentReason = document.getElementById('amendment-reason').value;
+
+            if (!amendmentReason) {
+                alert('Please select a reason for the amendment');
+                return;
+            }
+
+            const existingCourse = this.courses[existingIndex];
+
+            // Initialize amendments array if it doesn't exist
+            if (!course.amendments) {
+                course.amendments = existingCourse.amendments || [];
+            }
+
+            // Create amendment record
+            const amendment = {
+                timestamp: new Date().toISOString(),
+                reason: amendmentReason,
+                changes: this.detectCourseChanges(existingCourse, course)
+            };
+
+            course.amendments.push(amendment);
             this.courses[existingIndex] = course;
         } else {
+            // New course - no amendments needed
+            course.amendments = [];
             this.courses.push(course);
         }
 
@@ -1696,6 +2109,55 @@ class CoursePlanner {
         if (this.currentView === 'dashboard') {
             this.renderDashboard();
         }
+    }
+
+    detectCourseChanges(oldCourse, newCourse) {
+        const changes = [];
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+        if (oldCourse.name !== newCourse.name) {
+            changes.push(`Name: "${oldCourse.name}" → "${newCourse.name}"`);
+        }
+        if (oldCourse.code !== newCourse.code) {
+            changes.push(`Code: "${oldCourse.code}" → "${newCourse.code}"`);
+        }
+        if (oldCourse.tutorId !== newCourse.tutorId) {
+            const oldTutor = this.getTutorName(oldCourse.tutorId);
+            const newTutor = this.getTutorName(newCourse.tutorId);
+            changes.push(`Tutor: ${oldTutor} → ${newTutor}`);
+        }
+        if (oldCourse.locationId !== newCourse.locationId) {
+            const oldLocation = this.getLocationName(oldCourse.locationId);
+            const newLocation = this.getLocationName(newCourse.locationId);
+            changes.push(`Location: ${oldLocation} → ${newLocation}`);
+        }
+        if (oldCourse.startWeek !== newCourse.startWeek) {
+            changes.push(`Start Week: ${oldCourse.startWeek} → ${newCourse.startWeek}`);
+        }
+        if (oldCourse.duration !== newCourse.duration) {
+            changes.push(`Duration: ${oldCourse.duration} weeks → ${newCourse.duration} weeks`);
+        }
+
+        // Compare days of week
+        const oldDays = JSON.stringify((oldCourse.daysOfWeek || [oldCourse.dayOfWeek]).sort());
+        const newDays = JSON.stringify(newCourse.daysOfWeek.sort());
+        if (oldDays !== newDays) {
+            const oldDayNames = (oldCourse.daysOfWeek || [oldCourse.dayOfWeek]).map(d => days[d]).join(', ');
+            const newDayNames = newCourse.daysOfWeek.map(d => days[d]).join(', ');
+            changes.push(`Days: ${oldDayNames} → ${newDayNames}`);
+        }
+
+        if (oldCourse.startTime !== newCourse.startTime) {
+            changes.push(`Start Time: ${oldCourse.startTime} → ${newCourse.startTime}`);
+        }
+        if (oldCourse.endTime !== newCourse.endTime) {
+            changes.push(`End Time: ${oldCourse.endTime} → ${newCourse.endTime}`);
+        }
+        if (oldCourse.funded !== newCourse.funded) {
+            changes.push(`Funding: ${oldCourse.funded ? 'Funded' : 'Non-funded'} → ${newCourse.funded ? 'Funded' : 'Non-funded'}`);
+        }
+
+        return changes;
     }
 
     deleteCourse(courseId) {
@@ -1779,8 +2241,9 @@ class CoursePlanner {
         }
 
         // Find all matching courses in the data
-        const matchingCourses = this.courses.filter(course =>
-            course.name.toLowerCase().includes(term)
+        const matchingCourses = this.courses.filter(course => 
+            course.name.toLowerCase().includes(term) || 
+            (course.code && course.code.toLowerCase().includes(term))
         );
 
         if (matchingCourses.length === 0) {
@@ -1817,8 +2280,9 @@ class CoursePlanner {
         document.querySelectorAll('.course-block').forEach(block => {
             const courseName = block.querySelector('.course-name').textContent.toLowerCase();
             const courseDetails = block.querySelector('.course-details')?.textContent.toLowerCase() || '';
+            const courseCode = block.querySelector('.course-code')?.textContent.toLowerCase() || '';
 
-            if (courseName.includes(term) || courseDetails.includes(term)) {
+            if (courseName.includes(term) || courseDetails.includes(term) || courseCode.includes(term)) {
                 block.style.display = '';
             } else {
                 block.style.display = 'none';
@@ -1905,41 +2369,167 @@ class CoursePlanner {
         document.getElementById('week-range-display').textContent =
             weeksToShow === 1 ? `Week ${startWeek}` : `Weeks ${startWeek}-${endWeek}`;
 
-        const days = ['Time', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        const days = ['Time', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
         const timeSlots = this.generateTimeSlots();
+
+        // Set grid columns dynamically based on number of weeks (1 time column + 5 days × weeks)
+        // Use auto instead of 1fr to allow cells to grow based on their min-width
+        const totalColumns = 1 + (5 * weeksToShow);
+        container.style.gridTemplateColumns = `80px repeat(${5 * weeksToShow}, auto)`;
 
         // Header row with weeks
         let html = '<div class="calendar-header">Time</div>';
         for (let week = startWeek; week <= endWeek; week++) {
             const weekStart = this.getWeekStartDate(week);
             const weekStartFormatted = weekStart ? ` (w/b ${this.formatDate(weekStart)})` : '';
-            html += `<div class="calendar-header calendar-week-header" style="grid-column: span 7;">Week ${week}${weekStartFormatted}</div>`;
+            html += `<div class="calendar-header calendar-week-header" style="grid-column: span 5;">Week ${week}${weekStartFormatted}</div>`;
         }
 
         // Day headers for each week
         html += '<div class="calendar-header"></div>'; // Empty cell for time column
         for (let week = startWeek; week <= endWeek; week++) {
             for (let i = 1; i < days.length; i++) {
-                const dayOfWeek = i === 7 ? 0 : i;
-                const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-                html += `<div class="calendar-header calendar-day-header ${isWeekend ? 'weekend' : ''}">${days[i]}</div>`;
+                html += `<div class="calendar-header calendar-day-header">${days[i]}</div>`;
             }
         }
 
-        // Time slots and cells
-        timeSlots.forEach(time => {
+        // Helper function to assign courses to columns to avoid vertical overlap
+        const assignCourseColumns = (week, dayOfWeek) => {
+            // Get all courses for this day/week
+            const dayCourses = this.courses.filter(c => {
+                const courseDays = c.daysOfWeek || [c.dayOfWeek];
+                return courseDays.includes(dayOfWeek) &&
+                       c.startWeek <= week && (c.startWeek + c.duration - 1) >= week;
+            });
+
+            if (dayCourses.length === 0) return new Map();
+
+            // Sort by start time
+            dayCourses.sort((a, b) => {
+                const aStart = parseInt(a.startTime.split(':')[0]) * 60 + parseInt(a.startTime.split(':')[1]);
+                const bStart = parseInt(b.startTime.split(':')[0]) * 60 + parseInt(b.startTime.split(':')[1]);
+                return aStart - bStart;
+            });
+
+            // Assign columns using interval scheduling algorithm
+            const columns = []; // Each column is an array of courses
+            const courseToColumn = new Map(); // Map course ID to column index
+
+            dayCourses.forEach(course => {
+                const courseStart = parseInt(course.startTime.split(':')[0]) * 60 + parseInt(course.startTime.split(':')[1]);
+                const courseEnd = parseInt(course.endTime.split(':')[0]) * 60 + parseInt(course.endTime.split(':')[1]);
+
+                // Find first column where this course doesn't overlap with any existing course
+                let assignedColumn = -1;
+                for (let col = 0; col < columns.length; col++) {
+                    const lastCourse = columns[col][columns[col].length - 1];
+                    const lastEnd = parseInt(lastCourse.endTime.split(':')[0]) * 60 + parseInt(lastCourse.endTime.split(':')[1]);
+
+                    if (courseStart >= lastEnd) {
+                        // No overlap, can use this column
+                        columns[col].push(course);
+                        assignedColumn = col;
+                        break;
+                    }
+                }
+
+                // If no suitable column found, create new column
+                if (assignedColumn === -1) {
+                    columns.push([course]);
+                    assignedColumn = columns.length - 1;
+                }
+
+                courseToColumn.set(course.id, { column: assignedColumn, totalColumns: 0 });
+            });
+
+            // Update total columns for all courses
+            const totalColumns = columns.length;
+            courseToColumn.forEach(value => {
+                value.totalColumns = totalColumns;
+            });
+
+            return courseToColumn;
+        };
+
+        // Pre-calculate column assignments for all days
+        const columnAssignments = new Map();
+        for (let week = startWeek; week <= endWeek; week++) {
+            for (let day = 1; day <= 5; day++) {
+                const key = `${week}-${day}`;
+                columnAssignments.set(key, assignCourseColumns(week, day));
+            }
+        }
+
+        // Render cells
+        timeSlots.forEach((time, timeIndex) => {
             html += `<div class="calendar-time-label">${time}</div>`;
 
             for (let week = startWeek; week <= endWeek; week++) {
-                for (let day = 1; day <= 7; day++) {
-                    const dayOfWeek = day === 7 ? 0 : day;
-                    const coursesAtSlot = this.getCoursesAtTimeSlot(week, week, dayOfWeek, time);
-                    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday or Saturday
+                for (let day = 1; day <= 5; day++) {
+                    const dayOfWeek = day;
 
-                    html += `<div class="calendar-cell ${coursesAtSlot.length > 0 ? 'has-course' : ''} ${isWeekend ? 'weekend' : ''}"
-                             data-week="${week}" data-day="${dayOfWeek}" data-time="${time}">`;
+                    // Calculate the actual date for this cell
+                    const weekStart = this.getWeekStartDate(week);
+                    let isUnavailable = false;
+                    if (weekStart) {
+                        const cellDate = new Date(weekStart);
+                        // weekStart is guaranteed to be Monday (day 1)
+                        // dayOfWeek: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri
+                        // So Monday + 0 = Monday, Monday + 1 = Tuesday, etc.
+                        cellDate.setDate(cellDate.getDate() + (dayOfWeek - 1));
+                        const cellDateString = cellDate.toISOString().split('T')[0];
+                        isUnavailable = this.isDateUnavailable(cellDateString);
+
+                        // Debug log for first time slot only
+                        if (timeIndex === 0 && this.unavailableDates.length > 0) {
+                            console.log(`Week ${week}, Day ${dayOfWeek}: ${cellDateString}, Unavailable: ${isUnavailable}`);
+                        }
+                    }
+
+                    const coursesAtSlot = this.getCoursesAtTimeSlot(week, week, dayOfWeek, time);
+
+                    // Get column assignments for this day
+                    const dayKey = `${week}-${dayOfWeek}`;
+                    const dayColumnAssignments = columnAssignments.get(dayKey) || new Map();
+
+                    // Calculate which courses start in this slot
+                    const coursesStartingHere = [];
+                    let maxColumns = 1;
 
                     coursesAtSlot.forEach(course => {
+                        const startHour = parseInt(course.startTime.split(':')[0]);
+                        const slotHour = parseInt(time.split(':')[0]);
+
+                        // Only process courses that START at this time slot
+                        if (startHour === slotHour) {
+                            const endHour = parseInt(course.endTime.split(':')[0]);
+                            const startMinutes = parseInt(course.startTime.split(':')[1]);
+                            const endMinutes = parseInt(course.endTime.split(':')[1]);
+
+                            const courseStartTime = startHour * 60 + startMinutes;
+                            const courseEndTime = endHour * 60 + endMinutes;
+                            const courseDurationMinutes = courseEndTime - courseStartTime;
+                            const heightMultiplier = courseDurationMinutes / 60;
+
+                            const columnInfo = dayColumnAssignments.get(course.id) || { column: 0, totalColumns: 1 };
+                            if (columnInfo.totalColumns > maxColumns) {
+                                maxColumns = columnInfo.totalColumns;
+                            }
+                            coursesStartingHere.push({ course, heightMultiplier, columnInfo });
+                        }
+                    });
+
+                    // Calculate cell width based on number of columns
+                    const courseWidthPx = 150;
+                    const gapPx = 8;
+                    const cellWidth = maxColumns * courseWidthPx + (maxColumns - 1) * gapPx + 16; // +16 for padding
+
+                    html += `<div class="calendar-cell ${coursesAtSlot.length > 0 ? 'has-course' : ''} ${isUnavailable ? 'unavailable-date' : ''}"
+                             style="min-width: ${cellWidth}px;"
+                             data-week="${week}" data-day="${dayOfWeek}" data-time="${time}"
+                             title="${isUnavailable ? 'This date is unavailable for scheduling' : ''}">`;
+
+                    coursesStartingHere.forEach(({ course, heightMultiplier, columnInfo }) => {
                         const tutor = this.tutors.find(t => t.id === course.tutorId);
                         const location = this.locations.find(l => l.id === course.locationId);
 
@@ -1975,15 +2565,32 @@ class CoursePlanner {
                         // Use dashed borders for non-funded courses
                         const borderStyle = course.funded ? 'solid' : 'dashed';
 
+                        // Calculate height: each hour slot is 60px min + 1px gap
+                        // For multi-hour courses, we need to span across multiple cells visually
+                        const cellHeight = 61; // 60px min-height + 1px gap
+                        const totalHeight = (heightMultiplier * cellHeight) - 1; // Total pixels to span
+                        const zIndex = heightMultiplier > 1 ? 10 : 'auto'; // Bring spanning courses to front
+
+                        // Calculate width and position based on column assignment
+                        // Each course gets full cell width, positioned side by side with gap
+                        const courseWidthPx = 150; // Fixed width in pixels for each course
+                        const gapPx = 8; // Gap between courses
+                        const leftPositionPx = columnInfo.column * (courseWidthPx + gapPx);
+
                         html += `
                             <div class="course-block ${hasIssue ? 'conflict' : ''}"
                                  style="background-color: ${courseColor}20;
                                         border-left-color: ${courseColor};
                                         border-top: 3px ${borderStyle} ${fundedColor};
-                                        border-right: 3px ${borderStyle} ${fundedColor};"
+                                        border-right: 3px ${borderStyle} ${fundedColor};
+                                        height: ${totalHeight}px;
+                                        position: absolute;
+                                        left: ${leftPositionPx}px;
+                                        width: ${courseWidthPx}px;
+                                        z-index: ${zIndex};"
                                  onclick="planner.openCourseModal('${course.id}')">
                                 ${hasIssue ? '<span class="conflict-indicator">!</span>' : ''}
-                                <span class="course-name">${course.name}</span>
+                                <span class="course-name">${course.name} | ${course.code || 'No code'}</span>
                                 <div class="course-details">
                                     ${tutor ? tutor.name : 'No tutor'} | ${location ? location.name : 'No location'}
                                 </div>
@@ -1997,10 +2604,6 @@ class CoursePlanner {
         });
 
         container.innerHTML = html;
-
-        // Update grid columns dynamically
-        const totalColumns = 1 + (weeksToShow * 7); // 1 for time + 7 days per week
-        container.style.gridTemplateColumns = `80px repeat(${weeksToShow * 7}, 1fr)`;
     }
 
     generateTimeSlots() {
@@ -2293,6 +2896,9 @@ class CoursePlanner {
                 break;
             case 'unavailable-resources':
                 this.generateUnavailableResourcesReport(container);
+                break;
+            case 'amendments':
+                this.generateAmendmentsReport(container);
                 break;
         }
     }
@@ -2652,6 +3258,87 @@ class CoursePlanner {
         container.innerHTML = html;
     }
 
+    generateAmendmentsReport(container) {
+        let html = '<h3>Course Amendments History</h3>';
+
+        // Collect all courses with amendments
+        const coursesWithAmendments = this.courses.filter(course =>
+            course.amendments && course.amendments.length > 0
+        );
+
+        if (coursesWithAmendments.length === 0) {
+            html += '<p style="color: var(--gray-600); font-size: 1.1rem;">No course amendments have been recorded yet.</p>';
+        } else {
+            // Sort courses by most recent amendment
+            coursesWithAmendments.sort((a, b) => {
+                const aLatest = new Date(a.amendments[a.amendments.length - 1].timestamp);
+                const bLatest = new Date(b.amendments[b.amendments.length - 1].timestamp);
+                return bLatest - aLatest;
+            });
+
+            html += `
+                <div style="background: #e3f2fd; padding: 1rem; border-radius: 8px; border-left: 4px solid var(--primary-color); margin-bottom: 1rem;">
+                    <p><strong>${coursesWithAmendments.length} course(s) have been amended</strong></p>
+                    <p style="font-size: 0.9rem; margin-top: 0.5rem;">Total amendments: ${coursesWithAmendments.reduce((sum, c) => sum + c.amendments.length, 0)}</p>
+                </div>
+            `;
+
+            coursesWithAmendments.forEach(course => {
+                html += `
+                    <div style="margin-bottom: 2rem; padding: 1.5rem; background: white; border-radius: 8px; border: 1px solid var(--gray-300); box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <h4 style="margin: 0; color: var(--primary-color);">
+                                ${course.name} | ${course.code}
+                            </h4>
+                            <button class="btn btn-sm btn-secondary" onclick="planner.openCourseModal('${course.id}')">View Course</button>
+                        </div>
+                        <div style="margin-bottom: 0.5rem; color: var(--gray-600); font-size: 0.9rem;">
+                            <strong>Current Details:</strong>
+                            Weeks ${course.startWeek}-${course.startWeek + course.duration - 1},
+                            ${course.startTime}-${course.endTime},
+                            ${this.getTutorName(course.tutorId)} at ${this.getLocationName(course.locationId)}
+                        </div>
+                        <div style="border-left: 3px solid ${course.color}; padding-left: 1rem;">
+                            <strong style="color: var(--gray-700);">Amendment History (${course.amendments.length}):</strong>
+                            ${[...course.amendments].reverse().map((amendment, index) => {
+                                const date = new Date(amendment.timestamp);
+                                const formattedDate = date.toLocaleDateString('en-GB', {
+                                    day: 'numeric',
+                                    month: 'short',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                });
+
+                                return `
+                                    <div style="margin-top: 1rem; padding: 1rem; background: var(--gray-100); border-radius: 6px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem;">
+                                            <span style="font-weight: 600; color: var(--gray-700);">Amendment #${course.amendments.length - index}</span>
+                                            <span style="font-size: 0.85rem; color: var(--gray-600);">${formattedDate}</span>
+                                        </div>
+                                        <div style="background: #fff; padding: 0.75rem; border-radius: 4px; margin-bottom: 0.5rem;">
+                                            <strong style="color: var(--error-color);">Reason:</strong> ${amendment.reason}
+                                        </div>
+                                        ${amendment.changes && amendment.changes.length > 0 ? `
+                                            <div style="font-size: 0.9rem;">
+                                                <strong>Changes Made:</strong>
+                                                <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
+                                                    ${amendment.changes.map(change => `<li>${change}</li>`).join('')}
+                                                </ul>
+                                            </div>
+                                        ` : '<em style="color: var(--gray-500);">No specific changes recorded</em>'}
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        container.innerHTML = html;
+    }
+
     // Export Functions
     exportToPDF() {
         alert('PDF export requires a library like jsPDF. For now, you can print this page (Ctrl+P) and save as PDF.');
@@ -2668,6 +3355,7 @@ class CoursePlanner {
             const daysList = courseDays.map(d => days[d]).join('/');
 
             csv += `"${course.name}",`;
+            csv += `"${course.code || 'No code'}",`;
             csv += `"${this.getTutorName(course.tutorId)}",`;
             csv += `"${this.getLocationName(course.locationId)}",`;
             csv += `"${daysList}",`;
@@ -2691,6 +3379,108 @@ class CoursePlanner {
         this.downloadFile('course-planner-data.json', JSON.stringify(data, null, 2), 'application/json');
     }
 
+    anonymizeForAI(data) {
+        // Create anonymization mapping
+        const mapping = {
+            tutors: {},
+            locations: {}
+        };
+
+        // Deep clone the data
+        const anonymized = JSON.parse(JSON.stringify(data));
+
+        // Anonymize tutors
+        anonymized.tutors = anonymized.tutors.map((tutor, index) => {
+            const anonId = `TUTOR_${String.fromCharCode(65 + index)}`; // TUTOR_A, TUTOR_B, etc.
+            mapping.tutors[tutor.id] = {
+                anonName: anonId,
+                originalName: tutor.name,
+                originalEmail: tutor.email || null,
+                originalPhone: tutor.phone || null
+            };
+
+            return {
+                ...tutor,
+                name: anonId,
+                email: tutor.email ? `${anonId.toLowerCase()}@example.com` : null,
+                phone: tutor.phone ? '[REDACTED]' : null
+            };
+        });
+
+        // Anonymize locations
+        anonymized.locations = anonymized.locations.map((location, index) => {
+            const anonName = `VENUE_${index + 1}`; // VENUE_1, VENUE_2, etc.
+            mapping.locations[location.id] = {
+                anonName: anonName,
+                originalName: location.name
+            };
+
+            return {
+                ...location,
+                name: anonName
+            };
+        });
+
+        // Store mapping locally (NOT in the export)
+        localStorage.setItem('piiMapping', JSON.stringify(mapping));
+        console.log('🔒 PII mapping stored locally (not exported)');
+
+        return anonymized;
+    }
+
+    deAnonymizeFromAI(data) {
+        // Retrieve mapping
+        const mappingJson = localStorage.getItem('piiMapping');
+        if (!mappingJson) {
+            console.warn('⚠️ No PII mapping found. Data will remain anonymized.');
+            return data;
+        }
+
+        const mapping = JSON.parse(mappingJson);
+        const deAnonymized = JSON.parse(JSON.stringify(data));
+
+        // De-anonymize tutors
+        deAnonymized.tutors = deAnonymized.tutors.map(tutor => {
+            // Find the original tutor by matching the anonymized name
+            const originalTutor = Object.entries(mapping.tutors).find(
+                ([id, info]) => info.anonName === tutor.name
+            );
+
+            if (originalTutor) {
+                const [originalId, info] = originalTutor;
+                return {
+                    ...tutor,
+                    id: originalId, // Restore original ID
+                    name: info.originalName,
+                    email: info.originalEmail,
+                    phone: info.originalPhone
+                };
+            }
+            return tutor;
+        });
+
+        // De-anonymize locations
+        deAnonymized.locations = deAnonymized.locations.map(location => {
+            // Find the original location by matching the anonymized name
+            const originalLocation = Object.entries(mapping.locations).find(
+                ([id, info]) => info.anonName === location.name
+            );
+
+            if (originalLocation) {
+                const [originalId, info] = originalLocation;
+                return {
+                    ...location,
+                    id: originalId, // Restore original ID
+                    name: info.originalName
+                };
+            }
+            return location;
+        });
+
+        console.log('🔓 Data de-anonymized successfully');
+        return deAnonymized;
+    }
+
     exportForAI() {
         // Analyze all conflicts and issues
         const conflicts = this.detectAllConflicts();
@@ -2698,28 +3488,51 @@ class CoursePlanner {
         const qualificationIssues = this.detectQualificationIssues();
 
         // Build enhanced data structure
-        const aiData = {
+        const rawData = {
             tutors: this.tutors,
             locations: this.locations,
             courses: this.courses,
+            unavailableDates: this.unavailableDates || [],
             week1StartDate: this.week1StartDate,
             metadata: {
                 totalWeeks: 40,
                 timeSlots: "09:00-17:00 (courses can span multiple hours)",
                 daysOfWeek: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+                workingDays: "Monday-Friday only (days 1-5)",
                 exportDate: new Date().toISOString()
-            },
-            issues: {
-                conflicts: conflicts,
-                unavailableResources: unavailableResources,
-                qualificationIssues: qualificationIssues,
-                summary: {
-                    totalConflicts: conflicts.length,
-                    totalUnavailableResources: unavailableResources.length,
-                    totalQualificationIssues: qualificationIssues.length
-                }
             }
         };
+
+        // ANONYMIZE all PII data before sending to AI
+        const aiData = this.anonymizeForAI(rawData);
+
+        // Add SIMPLIFIED issues summary (no full course objects to reduce size)
+        aiData.issues = {
+            conflictsSummary: conflicts.map(c => ({
+                type: c.type,
+                message: c.message,
+                course1Id: c.course1?.id,
+                course2Id: c.course2?.id
+            })),
+            unavailableResourcesSummary: unavailableResources.map(ur => ({
+                courseId: ur.courseId,
+                courseName: ur.courseName,
+                issues: ur.issues
+            })),
+            qualificationIssuesSummary: qualificationIssues.map(qi => ({
+                courseId: qi.courseId,
+                courseName: qi.courseName,
+                issue: qi.issue
+            })),
+            summary: {
+                totalConflicts: conflicts.length,
+                totalUnavailableResources: unavailableResources.length,
+                totalQualificationIssues: qualificationIssues.length
+            }
+        };
+
+        // Add PII notice to metadata
+        aiData.metadata.piiNotice = "⚠️ All personal data (tutor names, emails, phones, location names) has been anonymized for privacy. Original data is stored locally and will be restored on import.";
 
         // Generate AI prompt
         const prompt = this.generateAIPrompt(aiData);
@@ -2727,8 +3540,14 @@ class CoursePlanner {
         // Copy to clipboard
         const fullText = prompt + "\n\n```json\n" + JSON.stringify(aiData, null, 2) + "\n```";
 
+        // Check if the text might be too long
+        const textLength = fullText.length;
+        const isLarge = textLength > 50000;
+        const warningText = isLarge ?
+            '\n\n⚠️ LARGE DATASET WARNING:\nYour data is quite large. If the AI says the JSON was cut off:\n- Use Claude.ai (supports larger inputs)\n- OR simplify by temporarily removing some courses\n- OR use the "conflicts report" to fix issues manually' : '';
+
         navigator.clipboard.writeText(fullText).then(() => {
-            alert('✅ AI optimization request copied to clipboard!\n\nNext steps:\n1. Open Claude or ChatGPT\n2. Paste the copied text (Ctrl+V)\n3. The AI will analyze and fix all issues\n4. Copy the AI\'s entire response\n5. Click "📋 Paste JSON from AI" to import it back\n\nNo need to create a file - just paste directly!');
+            alert(`✅ AI optimization request copied to clipboard!\n\n🔒 PII PROTECTION: All tutor names, emails, phones, and location names have been anonymized.\n\nData size: ${(textLength / 1024).toFixed(1)}KB${warningText}\n\nNext steps:\n1. Open Claude.ai or ChatGPT\n2. Paste the copied text (Ctrl+V)\n3. The AI will analyze and fix all issues\n4. Copy the AI\'s entire response\n5. Click "📋 Paste JSON from AI" to import it back\n\nYour original data will be automatically restored on import!`);
             this.closeModal('modal-export');
         }).catch(err => {
             alert('Could not copy to clipboard. Please try again or use the JSON export instead.');
@@ -2906,6 +3725,21 @@ class CoursePlanner {
     generateAIPrompt(data) {
         const { issues } = data;
 
+        // Count unavailable dates
+        const unavailableDatesCount = data.unavailableDates ? data.unavailableDates.length : 0;
+        let unavailableDatesInfo = '';
+        if (unavailableDatesCount > 0) {
+            unavailableDatesInfo = `\n\n**⚠️ CRITICAL: ${unavailableDatesCount} Unavailable Date(s):**\n`;
+            data.unavailableDates.forEach(entry => {
+                if (entry.type === 'single') {
+                    unavailableDatesInfo += `- ${entry.date}: ${entry.reason}\n`;
+                } else {
+                    unavailableDatesInfo += `- ${entry.startDate} to ${entry.endDate}: ${entry.reason}\n`;
+                }
+            });
+            unavailableDatesInfo += '\n**You MUST NOT schedule courses on these dates. Calculate which weeks/days these dates fall on and avoid them.**';
+        }
+
         return `I have a course scheduling system for an adult learning center with ${data.courses.length} courses, ${data.tutors.length} tutors, and ${data.locations.length} locations.
 
 I need you to analyze the JSON data below and automatically fix ALL scheduling issues while respecting all constraints.
@@ -2914,54 +3748,118 @@ I need you to analyze the JSON data below and automatically fix ALL scheduling i
 - **${issues.summary.totalConflicts} conflicts** (tutor/location double-bookings)
 - **${issues.summary.totalUnavailableResources} availability issues** (resources not available at scheduled times)
 - **${issues.summary.totalQualificationIssues} qualification issues** (tutors assigned to courses they're not qualified to teach)
+${unavailableDatesInfo}
+
+## CRITICAL CONSTRAINTS:
+
+**📅 Week System:**
+- Week 1 starts on: ${data.week1StartDate} (MUST be a Monday)
+- All weeks run Monday-Friday only
+- Planning period: Weeks 1-40
+
+**🚫 Courses run MONDAY-FRIDAY ONLY:**
+- Day numbers: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday
+- **NEVER use day 0 (Sunday) or day 6 (Saturday)**
+- The \`daysOfWeek\` array must ONLY contain values [1, 2, 3, 4, 5]
+
+**🔒 Unavailable Dates (NO COURSES ALLOWED):**
+${data.unavailableDates && data.unavailableDates.length > 0 ?
+`The following dates are blocked for scheduling:
+${data.unavailableDates.map(entry => {
+    if (entry.type === 'single') {
+        return `  - ${entry.date} (${entry.reason})`;
+    } else {
+        return `  - ${entry.startDate} to ${entry.endDate} (${entry.reason})`;
+    }
+}).join('\n')}
+
+**IMPORTANT:** Calculate which weeks these dates fall in based on week1StartDate, and ensure no course sessions fall on these dates.`
+: 'None specified'}
 
 ## Data Structure:
 
 **Tutors:**
 - \`id\`: unique identifier
-- \`name\`, \`email\`, \`phone\`, \`skills\`: contact info
+- \`name\`, \`email\`, \`phone\`, \`skills\`: contact info (may be anonymized for privacy)
 - \`canTeach\`: array of course IDs this tutor is qualified to teach
-- \`recurringAvailability\`: object mapping day numbers (0=Sun, 1=Mon, etc.) to time periods ["morning", "afternoon", "evening"]
+- \`recurringAvailability\`: object mapping day numbers (1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri) to time periods ["morning", "afternoon", "evening"]
   - morning: 09:00-12:00, afternoon: 12:00-17:00, evening: 17:00-21:00
 - \`customAvailability\`: array of specific date/time exceptions
 
 **Locations:**
 - \`id\`: unique identifier
-- \`name\`, \`capacity\`, \`facilities\`: location info
-- \`recurringAvailability\`: same format as tutors
+- \`name\`, \`capacity\`, \`facilities\`: location info (name may be anonymized for privacy)
+- \`recurringAvailability\`: same format as tutors (days 1-5 only)
 
 **Courses:**
 - \`id\`: unique identifier
-- \`name\`, \`color\`, \`funded\`, \`notes\`: course info
+- \`name\`, \`code\`, \`color\`, \`funded\`, \`notes\`: course info
 - \`tutorId\`: assigned tutor (can be "none" if not yet assigned)
 - \`locationId\`: assigned location (can be "none" if not yet assigned)
 - \`qualifiedTutors\`: array of tutor IDs who CAN teach this course
-- \`daysOfWeek\`: array of day numbers when course runs (0=Sun, 1=Mon, etc.)
+- \`daysOfWeek\`: array of day numbers (MUST be 1-5 ONLY, NO weekends)
 - \`startTime\`, \`endTime\`: time in HH:MM format (24-hour)
 - \`startWeek\`: which week course starts (1-40)
 - \`duration\`: how many weeks course runs
+- \`amendments\`: array of amendment history (preserve this, don't modify)
+
+**Unavailable Dates:**
+- \`unavailableDates\`: array of date entries
+  - \`type\`: "single" or "range"
+  - \`date\`: for single dates (YYYY-MM-DD)
+  - \`startDate\`, \`endDate\`: for date ranges
+  - \`reason\`: explanation (e.g., "Christmas Holiday")
 
 ## Requirements:
 
 1. **Fix all conflicts**: No tutor or location can be double-booked
 2. **Respect availability**: Only assign tutors/locations when they're marked as available
 3. **Respect qualifications**: Only assign tutors from the course's \`qualifiedTutors\` list
-4. **Preserve when possible**:
+4. **Monday-Friday ONLY**: Courses can ONLY run on days 1-5 (never 0 or 6)
+5. **Avoid unavailable dates**: Do NOT schedule courses on blocked dates
+6. **Preserve when possible**:
    - Keep course times and days the same if possible
    - Only change tutor/location assignments when necessary
    - If changing times, stay within resource availability
+   - Keep \`amendments\` array unchanged
 
-## Your Task:
+## Your Task - DO NOT ASK QUESTIONS, JUST FIX:
 
-1. Analyze all the issues listed above
-2. Make minimal changes to fix all conflicts
-3. Ensure all tutors and locations are available when scheduled
-4. Ensure all assigned tutors are qualified (\`tutorId\` must be in \`qualifiedTutors\` array)
-5. Return the COMPLETE corrected JSON with all tutors, locations, and courses
+**IMPORTANT**: Do NOT ask for clarification. Use these rules to fix automatically:
+
+1. **Analyze** all the issues listed above
+2. **Calculate** which dates fall on unavailable dates and avoid them
+3. **Fix conflicts** using this priority order:
+   - FIRST: Try reassigning to a different qualified tutor (check \`qualifiedTutors\` array)
+   - SECOND: Try reassigning to a different available location
+   - THIRD: Only if absolutely necessary, shift course to a different week (within availability)
+   - LAST RESORT: Change time slots (but keep within the same day if possible)
+4. **Qualification fixes**: If a tutor is not in \`qualifiedTutors\`, automatically reassign to ANY tutor who IS in that array AND is available
+5. **Availability fixes**: If tutor/location not available, automatically find an available alternative from the qualified list
+6. **Monday-Friday ONLY**: Ensure all \`daysOfWeek\` values are 1-5 only
+7. **Preserve what you can**: Keep times, days, and duration the same unless fixing requires changes
+8. **Return** the COMPLETE corrected JSON with ALL tutors, locations, courses, and unavailableDates
+
+## Critical Rules - NO EXCEPTIONS:
+
+✅ **You CAN**: Reassign tutors freely (as long as they're in \`qualifiedTutors\`)
+✅ **You CAN**: Reassign locations freely (as long as they're available)
+✅ **You CAN**: Move courses to different weeks if needed
+✅ **You CAN**: Change course times if absolutely necessary
+✅ **You MUST**: Fix ALL conflicts, qualification issues, and availability issues
+✅ **You MUST**: Only use days 1-5 (Monday-Friday)
+✅ **You MUST**: Avoid all dates in \`unavailableDates\`
+❌ **You CANNOT**: Leave any issues unfixed
+❌ **You CANNOT**: Assign unqualified tutors
+❌ **You CANNOT**: Schedule on unavailable dates
+❌ **You CANNOT**: Use days 0 or 6 (weekends)
+❌ **You CANNOT**: Ask questions - just apply the rules above
 
 ## Output Format:
 
-Return ONLY the corrected JSON in a code block, with no additional explanation. Make sure to include ALL fields, not just the ones you changed.
+Return ONLY the corrected JSON in a markdown code block (use triple backticks with json language tag). Include ALL fields unchanged except what you fixed. Do NOT add explanations before or after the JSON. Do NOT modify \`unavailableDates\` or \`amendments\` arrays.
+
+**IMPORTANT**: If you see this message was cut off or truncated, respond ONLY with: "DATA TOO LARGE - Please reduce course count or use API" - do NOT try to fix incomplete data.
 
 Here is the data to optimize:`;
     }
@@ -3011,9 +3909,22 @@ Here is the data to optimize:`;
                 return;
             }
 
-            // Close paste modal and show preview
-            this.closeModal('modal-paste-json');
-            this.showImportPreview(data);
+            // Check if data is anonymized (contains TUTOR_A, VENUE_1, etc.)
+            const isAnonymized = data.tutors.some(t => t.name && t.name.startsWith('TUTOR_')) ||
+                                data.locations.some(l => l.name && l.name.startsWith('VENUE_'));
+
+            if (isAnonymized) {
+                console.log('🔒 Anonymized data detected. De-anonymizing...');
+                const deAnonymizedData = this.deAnonymizeFromAI(data);
+
+                // Close paste modal and show preview
+                this.closeModal('modal-paste-json');
+                this.showImportPreview(deAnonymizedData);
+            } else {
+                // Close paste modal and show preview
+                this.closeModal('modal-paste-json');
+                this.showImportPreview(data);
+            }
 
         } catch (error) {
             console.error('Parse error:', error);
@@ -3053,8 +3964,14 @@ Here is the data to optimize:`;
                     return;
                 }
 
+                // Check if data is anonymized and de-anonymize if needed
+                const isAnonymized = data.tutors.some(t => t.name && t.name.startsWith('TUTOR_')) ||
+                                    data.locations.some(l => l.name && l.name.startsWith('VENUE_'));
+
+                const finalData = isAnonymized ? this.deAnonymizeFromAI(data) : data;
+
                 // Show preview/comparison
-                this.showImportPreview(data);
+                this.showImportPreview(finalData);
 
             } catch (error) {
                 const errorMsg = 'Error parsing JSON: ' + error.message + '\n\nMake sure you pasted valid JSON data.';

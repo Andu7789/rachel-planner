@@ -8,7 +8,8 @@
       "Bash(git remote add:*)",
       "Bash(git push:*)",
       "Bash(cat:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []
