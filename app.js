@@ -214,7 +214,8 @@ class CoursePlanner {
                 this.populateCourseSelector();
                 break;
             case 'reports':
-                // Reports are generated on demand
+                // Regenerate the current report to show latest data
+                this.generateReport();
                 break;
         }
     }
@@ -3378,6 +3379,108 @@ class CoursePlanner {
         this.downloadFile('course-planner-data.json', JSON.stringify(data, null, 2), 'application/json');
     }
 
+    anonymizeForAI(data) {
+        // Create anonymization mapping
+        const mapping = {
+            tutors: {},
+            locations: {}
+        };
+
+        // Deep clone the data
+        const anonymized = JSON.parse(JSON.stringify(data));
+
+        // Anonymize tutors
+        anonymized.tutors = anonymized.tutors.map((tutor, index) => {
+            const anonId = `TUTOR_${String.fromCharCode(65 + index)}`; // TUTOR_A, TUTOR_B, etc.
+            mapping.tutors[tutor.id] = {
+                anonName: anonId,
+                originalName: tutor.name,
+                originalEmail: tutor.email || null,
+                originalPhone: tutor.phone || null
+            };
+
+            return {
+                ...tutor,
+                name: anonId,
+                email: tutor.email ? `${anonId.toLowerCase()}@example.com` : null,
+                phone: tutor.phone ? '[REDACTED]' : null
+            };
+        });
+
+        // Anonymize locations
+        anonymized.locations = anonymized.locations.map((location, index) => {
+            const anonName = `VENUE_${index + 1}`; // VENUE_1, VENUE_2, etc.
+            mapping.locations[location.id] = {
+                anonName: anonName,
+                originalName: location.name
+            };
+
+            return {
+                ...location,
+                name: anonName
+            };
+        });
+
+        // Store mapping locally (NOT in the export)
+        localStorage.setItem('piiMapping', JSON.stringify(mapping));
+        console.log('🔒 PII mapping stored locally (not exported)');
+
+        return anonymized;
+    }
+
+    deAnonymizeFromAI(data) {
+        // Retrieve mapping
+        const mappingJson = localStorage.getItem('piiMapping');
+        if (!mappingJson) {
+            console.warn('⚠️ No PII mapping found. Data will remain anonymized.');
+            return data;
+        }
+
+        const mapping = JSON.parse(mappingJson);
+        const deAnonymized = JSON.parse(JSON.stringify(data));
+
+        // De-anonymize tutors
+        deAnonymized.tutors = deAnonymized.tutors.map(tutor => {
+            // Find the original tutor by matching the anonymized name
+            const originalTutor = Object.entries(mapping.tutors).find(
+                ([id, info]) => info.anonName === tutor.name
+            );
+
+            if (originalTutor) {
+                const [originalId, info] = originalTutor;
+                return {
+                    ...tutor,
+                    id: originalId, // Restore original ID
+                    name: info.originalName,
+                    email: info.originalEmail,
+                    phone: info.originalPhone
+                };
+            }
+            return tutor;
+        });
+
+        // De-anonymize locations
+        deAnonymized.locations = deAnonymized.locations.map(location => {
+            // Find the original location by matching the anonymized name
+            const originalLocation = Object.entries(mapping.locations).find(
+                ([id, info]) => info.anonName === location.name
+            );
+
+            if (originalLocation) {
+                const [originalId, info] = originalLocation;
+                return {
+                    ...location,
+                    id: originalId, // Restore original ID
+                    name: info.originalName
+                };
+            }
+            return location;
+        });
+
+        console.log('🔓 Data de-anonymized successfully');
+        return deAnonymized;
+    }
+
     exportForAI() {
         // Analyze all conflicts and issues
         const conflicts = this.detectAllConflicts();
@@ -3385,28 +3488,51 @@ class CoursePlanner {
         const qualificationIssues = this.detectQualificationIssues();
 
         // Build enhanced data structure
-        const aiData = {
+        const rawData = {
             tutors: this.tutors,
             locations: this.locations,
             courses: this.courses,
+            unavailableDates: this.unavailableDates || [],
             week1StartDate: this.week1StartDate,
             metadata: {
                 totalWeeks: 40,
                 timeSlots: "09:00-17:00 (courses can span multiple hours)",
                 daysOfWeek: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+                workingDays: "Monday-Friday only (days 1-5)",
                 exportDate: new Date().toISOString()
-            },
-            issues: {
-                conflicts: conflicts,
-                unavailableResources: unavailableResources,
-                qualificationIssues: qualificationIssues,
-                summary: {
-                    totalConflicts: conflicts.length,
-                    totalUnavailableResources: unavailableResources.length,
-                    totalQualificationIssues: qualificationIssues.length
-                }
             }
         };
+
+        // ANONYMIZE all PII data before sending to AI
+        const aiData = this.anonymizeForAI(rawData);
+
+        // Add SIMPLIFIED issues summary (no full course objects to reduce size)
+        aiData.issues = {
+            conflictsSummary: conflicts.map(c => ({
+                type: c.type,
+                message: c.message,
+                course1Id: c.course1?.id,
+                course2Id: c.course2?.id
+            })),
+            unavailableResourcesSummary: unavailableResources.map(ur => ({
+                courseId: ur.courseId,
+                courseName: ur.courseName,
+                issues: ur.issues
+            })),
+            qualificationIssuesSummary: qualificationIssues.map(qi => ({
+                courseId: qi.courseId,
+                courseName: qi.courseName,
+                issue: qi.issue
+            })),
+            summary: {
+                totalConflicts: conflicts.length,
+                totalUnavailableResources: unavailableResources.length,
+                totalQualificationIssues: qualificationIssues.length
+            }
+        };
+
+        // Add PII notice to metadata
+        aiData.metadata.piiNotice = "⚠️ All personal data (tutor names, emails, phones, location names) has been anonymized for privacy. Original data is stored locally and will be restored on import.";
 
         // Generate AI prompt
         const prompt = this.generateAIPrompt(aiData);
@@ -3414,8 +3540,14 @@ class CoursePlanner {
         // Copy to clipboard
         const fullText = prompt + "\n\n```json\n" + JSON.stringify(aiData, null, 2) + "\n```";
 
+        // Check if the text might be too long
+        const textLength = fullText.length;
+        const isLarge = textLength > 50000;
+        const warningText = isLarge ?
+            '\n\n⚠️ LARGE DATASET WARNING:\nYour data is quite large. If the AI says the JSON was cut off:\n- Use Claude.ai (supports larger inputs)\n- OR simplify by temporarily removing some courses\n- OR use the "conflicts report" to fix issues manually' : '';
+
         navigator.clipboard.writeText(fullText).then(() => {
-            alert('✅ AI optimization request copied to clipboard!\n\nNext steps:\n1. Open Claude or ChatGPT\n2. Paste the copied text (Ctrl+V)\n3. The AI will analyze and fix all issues\n4. Copy the AI\'s entire response\n5. Click "📋 Paste JSON from AI" to import it back\n\nNo need to create a file - just paste directly!');
+            alert(`✅ AI optimization request copied to clipboard!\n\n🔒 PII PROTECTION: All tutor names, emails, phones, and location names have been anonymized.\n\nData size: ${(textLength / 1024).toFixed(1)}KB${warningText}\n\nNext steps:\n1. Open Claude.ai or ChatGPT\n2. Paste the copied text (Ctrl+V)\n3. The AI will analyze and fix all issues\n4. Copy the AI\'s entire response\n5. Click "📋 Paste JSON from AI" to import it back\n\nYour original data will be automatically restored on import!`);
             this.closeModal('modal-export');
         }).catch(err => {
             alert('Could not copy to clipboard. Please try again or use the JSON export instead.');
@@ -3593,6 +3725,21 @@ class CoursePlanner {
     generateAIPrompt(data) {
         const { issues } = data;
 
+        // Count unavailable dates
+        const unavailableDatesCount = data.unavailableDates ? data.unavailableDates.length : 0;
+        let unavailableDatesInfo = '';
+        if (unavailableDatesCount > 0) {
+            unavailableDatesInfo = `\n\n**⚠️ CRITICAL: ${unavailableDatesCount} Unavailable Date(s):**\n`;
+            data.unavailableDates.forEach(entry => {
+                if (entry.type === 'single') {
+                    unavailableDatesInfo += `- ${entry.date}: ${entry.reason}\n`;
+                } else {
+                    unavailableDatesInfo += `- ${entry.startDate} to ${entry.endDate}: ${entry.reason}\n`;
+                }
+            });
+            unavailableDatesInfo += '\n**You MUST NOT schedule courses on these dates. Calculate which weeks/days these dates fall on and avoid them.**';
+        }
+
         return `I have a course scheduling system for an adult learning center with ${data.courses.length} courses, ${data.tutors.length} tutors, and ${data.locations.length} locations.
 
 I need you to analyze the JSON data below and automatically fix ALL scheduling issues while respecting all constraints.
@@ -3601,54 +3748,118 @@ I need you to analyze the JSON data below and automatically fix ALL scheduling i
 - **${issues.summary.totalConflicts} conflicts** (tutor/location double-bookings)
 - **${issues.summary.totalUnavailableResources} availability issues** (resources not available at scheduled times)
 - **${issues.summary.totalQualificationIssues} qualification issues** (tutors assigned to courses they're not qualified to teach)
+${unavailableDatesInfo}
+
+## CRITICAL CONSTRAINTS:
+
+**📅 Week System:**
+- Week 1 starts on: ${data.week1StartDate} (MUST be a Monday)
+- All weeks run Monday-Friday only
+- Planning period: Weeks 1-40
+
+**🚫 Courses run MONDAY-FRIDAY ONLY:**
+- Day numbers: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday
+- **NEVER use day 0 (Sunday) or day 6 (Saturday)**
+- The \`daysOfWeek\` array must ONLY contain values [1, 2, 3, 4, 5]
+
+**🔒 Unavailable Dates (NO COURSES ALLOWED):**
+${data.unavailableDates && data.unavailableDates.length > 0 ?
+`The following dates are blocked for scheduling:
+${data.unavailableDates.map(entry => {
+    if (entry.type === 'single') {
+        return `  - ${entry.date} (${entry.reason})`;
+    } else {
+        return `  - ${entry.startDate} to ${entry.endDate} (${entry.reason})`;
+    }
+}).join('\n')}
+
+**IMPORTANT:** Calculate which weeks these dates fall in based on week1StartDate, and ensure no course sessions fall on these dates.`
+: 'None specified'}
 
 ## Data Structure:
 
 **Tutors:**
 - \`id\`: unique identifier
-- \`name\`, \`email\`, \`phone\`, \`skills\`: contact info
+- \`name\`, \`email\`, \`phone\`, \`skills\`: contact info (may be anonymized for privacy)
 - \`canTeach\`: array of course IDs this tutor is qualified to teach
-- \`recurringAvailability\`: object mapping day numbers (0=Sun, 1=Mon, etc.) to time periods ["morning", "afternoon", "evening"]
+- \`recurringAvailability\`: object mapping day numbers (1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri) to time periods ["morning", "afternoon", "evening"]
   - morning: 09:00-12:00, afternoon: 12:00-17:00, evening: 17:00-21:00
 - \`customAvailability\`: array of specific date/time exceptions
 
 **Locations:**
 - \`id\`: unique identifier
-- \`name\`, \`capacity\`, \`facilities\`: location info
-- \`recurringAvailability\`: same format as tutors
+- \`name\`, \`capacity\`, \`facilities\`: location info (name may be anonymized for privacy)
+- \`recurringAvailability\`: same format as tutors (days 1-5 only)
 
 **Courses:**
 - \`id\`: unique identifier
-- \`name\`, \`color\`, \`funded\`, \`notes\`: course info
+- \`name\`, \`code\`, \`color\`, \`funded\`, \`notes\`: course info
 - \`tutorId\`: assigned tutor (can be "none" if not yet assigned)
 - \`locationId\`: assigned location (can be "none" if not yet assigned)
 - \`qualifiedTutors\`: array of tutor IDs who CAN teach this course
-- \`daysOfWeek\`: array of day numbers when course runs (0=Sun, 1=Mon, etc.)
+- \`daysOfWeek\`: array of day numbers (MUST be 1-5 ONLY, NO weekends)
 - \`startTime\`, \`endTime\`: time in HH:MM format (24-hour)
 - \`startWeek\`: which week course starts (1-40)
 - \`duration\`: how many weeks course runs
+- \`amendments\`: array of amendment history (preserve this, don't modify)
+
+**Unavailable Dates:**
+- \`unavailableDates\`: array of date entries
+  - \`type\`: "single" or "range"
+  - \`date\`: for single dates (YYYY-MM-DD)
+  - \`startDate\`, \`endDate\`: for date ranges
+  - \`reason\`: explanation (e.g., "Christmas Holiday")
 
 ## Requirements:
 
 1. **Fix all conflicts**: No tutor or location can be double-booked
 2. **Respect availability**: Only assign tutors/locations when they're marked as available
 3. **Respect qualifications**: Only assign tutors from the course's \`qualifiedTutors\` list
-4. **Preserve when possible**:
+4. **Monday-Friday ONLY**: Courses can ONLY run on days 1-5 (never 0 or 6)
+5. **Avoid unavailable dates**: Do NOT schedule courses on blocked dates
+6. **Preserve when possible**:
    - Keep course times and days the same if possible
    - Only change tutor/location assignments when necessary
    - If changing times, stay within resource availability
+   - Keep \`amendments\` array unchanged
 
-## Your Task:
+## Your Task - DO NOT ASK QUESTIONS, JUST FIX:
 
-1. Analyze all the issues listed above
-2. Make minimal changes to fix all conflicts
-3. Ensure all tutors and locations are available when scheduled
-4. Ensure all assigned tutors are qualified (\`tutorId\` must be in \`qualifiedTutors\` array)
-5. Return the COMPLETE corrected JSON with all tutors, locations, and courses
+**IMPORTANT**: Do NOT ask for clarification. Use these rules to fix automatically:
+
+1. **Analyze** all the issues listed above
+2. **Calculate** which dates fall on unavailable dates and avoid them
+3. **Fix conflicts** using this priority order:
+   - FIRST: Try reassigning to a different qualified tutor (check \`qualifiedTutors\` array)
+   - SECOND: Try reassigning to a different available location
+   - THIRD: Only if absolutely necessary, shift course to a different week (within availability)
+   - LAST RESORT: Change time slots (but keep within the same day if possible)
+4. **Qualification fixes**: If a tutor is not in \`qualifiedTutors\`, automatically reassign to ANY tutor who IS in that array AND is available
+5. **Availability fixes**: If tutor/location not available, automatically find an available alternative from the qualified list
+6. **Monday-Friday ONLY**: Ensure all \`daysOfWeek\` values are 1-5 only
+7. **Preserve what you can**: Keep times, days, and duration the same unless fixing requires changes
+8. **Return** the COMPLETE corrected JSON with ALL tutors, locations, courses, and unavailableDates
+
+## Critical Rules - NO EXCEPTIONS:
+
+✅ **You CAN**: Reassign tutors freely (as long as they're in \`qualifiedTutors\`)
+✅ **You CAN**: Reassign locations freely (as long as they're available)
+✅ **You CAN**: Move courses to different weeks if needed
+✅ **You CAN**: Change course times if absolutely necessary
+✅ **You MUST**: Fix ALL conflicts, qualification issues, and availability issues
+✅ **You MUST**: Only use days 1-5 (Monday-Friday)
+✅ **You MUST**: Avoid all dates in \`unavailableDates\`
+❌ **You CANNOT**: Leave any issues unfixed
+❌ **You CANNOT**: Assign unqualified tutors
+❌ **You CANNOT**: Schedule on unavailable dates
+❌ **You CANNOT**: Use days 0 or 6 (weekends)
+❌ **You CANNOT**: Ask questions - just apply the rules above
 
 ## Output Format:
 
-Return ONLY the corrected JSON in a code block, with no additional explanation. Make sure to include ALL fields, not just the ones you changed.
+Return ONLY the corrected JSON in a markdown code block (use triple backticks with json language tag). Include ALL fields unchanged except what you fixed. Do NOT add explanations before or after the JSON. Do NOT modify \`unavailableDates\` or \`amendments\` arrays.
+
+**IMPORTANT**: If you see this message was cut off or truncated, respond ONLY with: "DATA TOO LARGE - Please reduce course count or use API" - do NOT try to fix incomplete data.
 
 Here is the data to optimize:`;
     }
@@ -3698,9 +3909,22 @@ Here is the data to optimize:`;
                 return;
             }
 
-            // Close paste modal and show preview
-            this.closeModal('modal-paste-json');
-            this.showImportPreview(data);
+            // Check if data is anonymized (contains TUTOR_A, VENUE_1, etc.)
+            const isAnonymized = data.tutors.some(t => t.name && t.name.startsWith('TUTOR_')) ||
+                                data.locations.some(l => l.name && l.name.startsWith('VENUE_'));
+
+            if (isAnonymized) {
+                console.log('🔒 Anonymized data detected. De-anonymizing...');
+                const deAnonymizedData = this.deAnonymizeFromAI(data);
+
+                // Close paste modal and show preview
+                this.closeModal('modal-paste-json');
+                this.showImportPreview(deAnonymizedData);
+            } else {
+                // Close paste modal and show preview
+                this.closeModal('modal-paste-json');
+                this.showImportPreview(data);
+            }
 
         } catch (error) {
             console.error('Parse error:', error);
@@ -3740,8 +3964,14 @@ Here is the data to optimize:`;
                     return;
                 }
 
+                // Check if data is anonymized and de-anonymize if needed
+                const isAnonymized = data.tutors.some(t => t.name && t.name.startsWith('TUTOR_')) ||
+                                    data.locations.some(l => l.name && l.name.startsWith('VENUE_'));
+
+                const finalData = isAnonymized ? this.deAnonymizeFromAI(data) : data;
+
                 // Show preview/comparison
-                this.showImportPreview(data);
+                this.showImportPreview(finalData);
 
             } catch (error) {
                 const errorMsg = 'Error parsing JSON: ' + error.message + '\n\nMake sure you pasted valid JSON data.';
