@@ -520,8 +520,8 @@ body {
 .calendar-cell {
     background: white;
     padding: 0.5rem;
-    min-height: 60px;
-    height: 60px;
+    min-height: 75px;
+    height: 90px;
     position: relative;
     cursor: pointer;
     transition: background 0.2s ease;
@@ -610,6 +610,13 @@ body {
 .course-details {
     font-size: 0.75rem;
     opacity: 0.9;
+}
+
+.course-dates {
+    font-size: 0.7rem;
+    opacity: 0.8;
+    margin-top: 0.2rem;
+    font-style: italic;
 }
 
 .conflict-indicator {
