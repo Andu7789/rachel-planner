@@ -88,7 +88,12 @@ body {
 
 #view-courses {
     height: calc(100vh - 60px);
-    overflow-y: auto;
+    overflow: hidden;
+}
+
+#view-courses.active {
+    display: flex;
+    flex-direction: column;
 }
 
 @keyframes fadeIn {
@@ -461,7 +466,9 @@ body {
     border-radius: var(--border-radius);
     box-shadow: var(--box-shadow);
     padding: 1.5rem;
-    overflow-x: auto;
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
 }
 
 .calendar-grid {
