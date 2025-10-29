@@ -693,7 +693,7 @@ textarea.input {
 /* Availability Grid */
 .availability-grid {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 0.5rem;
     margin-top: 0.5rem;
 }
@@ -1006,6 +1006,60 @@ textarea.input {
     filter: brightness(0.95);
     transform: translateX(2px);
     transition: var(--transition);
+}
+
+/* Travel Times Container */
+.travel-times-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 0.8rem;
+    margin-top: 0.5rem;
+    padding: 1rem;
+    background: var(--gray-100);
+    border-radius: var(--border-radius);
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.travel-time-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    background: white;
+    border-radius: 4px;
+    border: 1px solid var(--gray-300);
+}
+
+.travel-time-row label {
+    flex: 1;
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--gray-700);
+    font-weight: 500;
+}
+
+.travel-time-row input {
+    width: 80px;
+    padding: 0.4rem;
+    border: 1px solid var(--gray-400);
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.travel-time-row input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.1);
+}
+
+.travel-times-empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: var(--gray-500);
+    font-size: 0.85rem;
+    font-style: italic;
+    padding: 1rem;
 }
 
 /* Utility Classes */

@@ -115,6 +115,12 @@ class CoursePlanner {
                 location._migrated = true;
                 needsSave = true;
             }
+
+            // Initialize travelTimes if it doesn't exist
+            if (!location.travelTimes) {
+                location.travelTimes = {};
+                needsSave = true;
+            }
         });
 
         // Migrate courses
@@ -641,7 +647,7 @@ class CoursePlanner {
                     Object.keys(tutor.recurringAvailability).forEach(day => {
                         const slots = tutor.recurringAvailability[day];
                         slots.forEach(slot => {
-                            const checkbox = document.querySelector(`input[data-day="${day}"][data-period="${slot}"]`);
+                            const checkbox = document.querySelector(`#tutor-recurring-availability input[data-day="${day}"][data-period="${slot}"]`);
                             if (checkbox) checkbox.checked = true;
                         });
                     });
@@ -711,14 +717,13 @@ class CoursePlanner {
 
     renderRecurringAvailability(type) {
         // Use same day indexing as course form: Sunday=0, Monday=1, etc.
+        // Removed Saturday and Sunday as they are not used
         const days = [
             { name: 'Mon', value: 1 },
             { name: 'Tue', value: 2 },
             { name: 'Wed', value: 3 },
             { name: 'Thu', value: 4 },
-            { name: 'Fri', value: 5 },
-            { name: 'Sat', value: 6 },
-            { name: 'Sun', value: 0 }
+            { name: 'Fri', value: 5 }
         ];
         const periods = ['Morning', 'Afternoon', 'Evening'];
         const containerId = type === 'tutor' ? 'tutor-recurring-availability' : 'location-recurring-availability';
@@ -988,11 +993,13 @@ class CoursePlanner {
                 }
 
                 this.renderCustomAvailability('location', location.customAvailability || []);
+                this.populateTravelTimesForm(locationId);
             }
         } else {
             document.getElementById('location-modal-title').textContent = 'Add Location';
             document.getElementById('location-id').value = ''; // Explicitly clear ID for new location
             this.renderCustomAvailability('location', []);
+            this.populateTravelTimesForm(null);
         }
 
         this.openModal('modal-location');
@@ -1001,6 +1008,41 @@ class CoursePlanner {
         setTimeout(() => {
             document.getElementById('location-name').focus();
         }, 150);
+    }
+
+    populateTravelTimesForm(currentLocationId) {
+        const container = document.getElementById('location-travel-times-container');
+
+        // Get all locations except the current one being edited
+        const otherLocations = this.locations.filter(loc => loc.id !== currentLocationId);
+
+        if (otherLocations.length === 0) {
+            container.innerHTML = '<div class="travel-times-empty">No other locations exist yet. Travel times will appear here when you add more locations.</div>';
+            return;
+        }
+
+        const currentLocation = currentLocationId ? this.locations.find(l => l.id === currentLocationId) : null;
+        const existingTravelTimes = currentLocation?.travelTimes || {};
+
+        container.innerHTML = otherLocations.map(location => {
+            const travelTime = existingTravelTimes[location.id] || '';
+            return `
+                <div class="travel-time-row">
+                    <label for="travel-time-${location.id}">To ${location.name}:</label>
+                    <input
+                        type="number"
+                        id="travel-time-${location.id}"
+                        data-location-id="${location.id}"
+                        class="travel-time-input"
+                        min="0"
+                        step="5"
+                        value="${travelTime}"
+                        placeholder="0"
+                        ${otherLocations.length > 0 ? 'required' : ''}
+                    />
+                </div>
+            `;
+        }).join('');
     }
 
     saveLocation(e) {
@@ -1029,13 +1071,39 @@ class CoursePlanner {
             });
         });
 
+        // Collect travel times
+        const travelTimes = {};
+        const travelTimeInputs = document.querySelectorAll('.travel-time-input');
+
+        // Validate that all travel times are filled if there are other locations
+        if (travelTimeInputs.length > 0) {
+            let hasEmptyTravelTimes = false;
+            travelTimeInputs.forEach(input => {
+                const value = input.value.trim();
+                if (value === '') {
+                    hasEmptyTravelTimes = true;
+                    input.style.borderColor = 'red';
+                } else {
+                    input.style.borderColor = '';
+                    const otherLocationId = input.getAttribute('data-location-id');
+                    travelTimes[otherLocationId] = parseInt(value);
+                }
+            });
+
+            if (hasEmptyTravelTimes) {
+                alert('Please fill in all travel times to other locations. This is required to prevent scheduling conflicts.');
+                return;
+            }
+        }
+
         const location = {
             id: locationId,
             name,
             capacity: capacity ? parseInt(capacity) : null,
             facilities,
             recurringAvailability,
-            customAvailability
+            customAvailability,
+            travelTimes
         };
 
         const existingIndex = this.locations.findIndex(l => l.id === locationId);
@@ -1044,6 +1112,20 @@ class CoursePlanner {
         } else {
             this.locations.push(location);
         }
+
+        // Update reverse travel times for other locations
+        Object.keys(travelTimes).forEach(otherLocationId => {
+            const otherLocation = this.locations.find(l => l.id === otherLocationId);
+            if (otherLocation) {
+                if (!otherLocation.travelTimes) {
+                    otherLocation.travelTimes = {};
+                }
+                // Set the reverse travel time (can be asymmetric but defaults to same value)
+                if (!otherLocation.travelTimes[locationId]) {
+                    otherLocation.travelTimes[locationId] = travelTimes[otherLocationId];
+                }
+            }
+        });
 
         this.saveData();
         this.closeModal('modal-location');
@@ -1524,6 +1606,26 @@ class CoursePlanner {
                 if (hasConflict) {
                     status.push('Conflict');
                     statusEmoji = '🔴';
+                }
+
+                // Check travel time conflicts
+                const locationId = document.getElementById('course-location').value;
+                if (locationId && locationId !== 'none') {
+                    const tempCourse = {
+                        id: courseId || 'temp',
+                        tutorId: tutor.id,
+                        locationId: locationId,
+                        daysOfWeek: daysOfWeek,
+                        startTime: startTime,
+                        endTime: endTime,
+                        startWeek: startWeek,
+                        duration: duration
+                    };
+                    const travelConflicts = this.checkTutorTravelConflicts(tempCourse);
+                    if (travelConflicts.length > 0) {
+                        status.push('Travel Conflict');
+                        statusEmoji = '🔴';
+                    }
                 }
             }
 
@@ -2056,8 +2158,21 @@ class CoursePlanner {
 
         // Check for double-booking conflicts on all days
         const conflicts = this.checkCourseConflicts(course);
-        if (conflicts.length > 0) {
-            const conflictMessages = conflicts.map(c => `- ${c.message}`).join('\n');
+
+        // Separate travel conflicts from other conflicts
+        const travelConflicts = conflicts.filter(c => c.type === 'travel');
+        const otherConflicts = conflicts.filter(c => c.type !== 'travel');
+
+        // Travel conflicts are BLOCKING - cannot proceed
+        if (travelConflicts.length > 0) {
+            const conflictMessages = travelConflicts.map(c => `- ${c.message}`).join('\n\n');
+            alert(`ERROR: This course cannot be scheduled due to travel time restrictions:\n\n${conflictMessages}\n\nPlease adjust the course schedule or location to allow sufficient travel time between locations.`);
+            return;
+        }
+
+        // Other conflicts are warnings - can override
+        if (otherConflicts.length > 0) {
+            const conflictMessages = otherConflicts.map(c => `- ${c.message}`).join('\n');
             if (!confirm(`WARNING: This course creates the following conflicts:\n\n${conflictMessages}\n\nDo you want to schedule this course anyway?`)) {
                 return;
             }
@@ -2773,6 +2888,102 @@ class CoursePlanner {
                     });
                 }
             }
+        });
+
+        // Check for travel time conflicts
+        const travelConflicts = this.checkTutorTravelConflicts(newCourse);
+        conflicts.push(...travelConflicts);
+
+        return conflicts;
+    }
+
+    checkTutorTravelConflicts(newCourse) {
+        const conflicts = [];
+
+        // Skip if course has no tutor assigned
+        if (!newCourse.tutorId || newCourse.tutorId === 'none') {
+            return conflicts;
+        }
+
+        // Skip if course has no location assigned
+        if (!newCourse.locationId || newCourse.locationId === 'none') {
+            return conflicts;
+        }
+
+        const tutorName = this.getTutorName(newCourse.tutorId);
+        const newLocation = this.locations.find(l => l.id === newCourse.locationId);
+        if (!newLocation) return conflicts;
+
+        // Get all courses for the same tutor on the same days (excluding the current course being edited)
+        const tutorCourses = this.courses.filter(course =>
+            course.id !== newCourse.id &&
+            course.tutorId === newCourse.tutorId &&
+            course.tutorId !== 'none' &&
+            course.locationId !== 'none'
+        );
+
+        // Check each day the new course runs
+        newCourse.daysOfWeek.forEach(newDay => {
+            // Find other courses on the same day
+            tutorCourses.forEach(existingCourse => {
+                if (!existingCourse.daysOfWeek.includes(newDay)) return;
+
+                // Check if the courses are in overlapping weeks
+                const newStart = newCourse.startWeek;
+                const newEnd = newCourse.startWeek + newCourse.duration - 1;
+                const existingStart = existingCourse.startWeek;
+                const existingEnd = existingCourse.startWeek + existingCourse.duration - 1;
+
+                // Check if weeks overlap
+                if (newEnd < existingStart || newStart > existingEnd) {
+                    return; // No week overlap
+                }
+
+                // If locations are the same, no travel time needed
+                if (newCourse.locationId === existingCourse.locationId) {
+                    return;
+                }
+
+                const existingLocation = this.locations.find(l => l.id === existingCourse.locationId);
+                if (!existingLocation) return;
+
+                // Get travel time between locations
+                const travelMinutes = newLocation.travelTimes?.[existingLocation.id] || 0;
+                if (travelMinutes === 0) return; // No travel time configured
+
+                const bufferMinutes = 15; // Optional buffer time
+                const requiredGap = travelMinutes + bufferMinutes;
+
+                // Convert times to minutes
+                const newStartMinutes = this.timeToMinutes(newCourse.startTime);
+                const newEndMinutes = this.timeToMinutes(newCourse.endTime);
+                const existingStartMinutes = this.timeToMinutes(existingCourse.startTime);
+                const existingEndMinutes = this.timeToMinutes(existingCourse.endTime);
+
+                // Check if the new course starts after the existing course
+                if (newStartMinutes > existingEndMinutes) {
+                    const actualGap = newStartMinutes - existingEndMinutes;
+                    if (actualGap < requiredGap) {
+                        conflicts.push({
+                            message: `Travel time conflict: "${tutorName}" cannot travel from ${existingLocation.name} (where "${existingCourse.name}" ends at ${existingCourse.endTime}) to ${newLocation.name} in time for this course at ${newCourse.startTime}. Required: ${travelMinutes} minutes travel + ${bufferMinutes} minutes buffer = ${requiredGap} minutes total, but only ${actualGap} minutes available.`,
+                            conflictingCourse: existingCourse,
+                            type: 'travel'
+                        });
+                    }
+                }
+
+                // Check if the existing course starts after the new course
+                if (existingStartMinutes > newEndMinutes) {
+                    const actualGap = existingStartMinutes - newEndMinutes;
+                    if (actualGap < requiredGap) {
+                        conflicts.push({
+                            message: `Travel time conflict: "${tutorName}" cannot travel from ${newLocation.name} (where this course ends at ${newCourse.endTime}) to ${existingLocation.name} in time for "${existingCourse.name}" at ${existingCourse.startTime}. Required: ${travelMinutes} minutes travel + ${bufferMinutes} minutes buffer = ${requiredGap} minutes total, but only ${actualGap} minutes available.`,
+                            conflictingCourse: existingCourse,
+                            type: 'travel'
+                        });
+                    }
+                }
+            });
         });
 
         return conflicts;

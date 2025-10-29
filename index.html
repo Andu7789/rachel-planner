@@ -250,6 +250,13 @@
                         <button type="button" id="btn-add-custom-location-availability" class="btn btn-secondary btn-sm">Add Custom Period</button>
                         <div id="location-custom-availability" class="custom-availability-list"></div>
                     </div>
+                    <div class="form-group">
+                        <label>Travel Times to Other Locations (minutes) <span style="color: red;">*</span></label>
+                        <p style="font-size: 0.85rem; color: var(--gray-600); margin-bottom: 0.5rem;">
+                            Specify how long it takes to travel from this location to each other location. This prevents tutors from being double-booked when they cannot physically travel between locations in time.
+                        </p>
+                        <div id="location-travel-times-container" class="travel-times-container"></div>
+                    </div>
                     <div class="form-actions">
                         <button type="button" class="btn btn-secondary" data-modal="modal-location">Cancel</button>
                         <button type="submit" class="btn btn-primary">Save Location</button>
