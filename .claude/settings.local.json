@@ -9,7 +9,9 @@
       "Bash(git push:*)",
       "Bash(cat:*)",
       "Bash(node -e:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(dir)",
+      "Read(//c/Users/andre/Downloads/**)"
     ],
     "deny": [],
     "ask": []
